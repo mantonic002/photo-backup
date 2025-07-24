@@ -1,19 +1,19 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net/http"
+	"photo-backup/api"
 )
 
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello, World!")
-	})
+	apiHandlers := &api.PhotoHandlers{}
+	mux := http.NewServeMux()
+	apiHandlers.ServeHTTP(mux)
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "OK")
-	})
+	log.Println("Starting server on :8080")
 
-	http.ListenAndServe(":8080", nil)
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatal(err)
+	}
 }
