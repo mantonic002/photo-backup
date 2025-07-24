@@ -4,10 +4,17 @@ import (
 	"log"
 	"net/http"
 	"photo-backup/api"
+	"photo-backup/storage"
 )
 
 func main() {
-	apiHandlers := &api.PhotoHandlers{}
+	localStorage := &storage.LocalPhotoStorage{
+		Directory: "./.uploads",
+	}
+
+	apiHandlers := &api.PhotoHandlers{
+		Storage: localStorage,
+	}
 	mux := http.NewServeMux()
 	apiHandlers.ServeHTTP(mux)
 
