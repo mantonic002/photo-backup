@@ -83,7 +83,7 @@ func (h *PhotoHandlers) processAndStoreFile(fileHeader *multipart.FileHeader) er
 		Size:        fileHeader.Size,
 		ContentType: fileHeader.Header.Get("Content-Type"),
 		Filename:    fileHeader.Filename,
-		FileContent: string(content),
+		FileContent: content,
 	}
 
 	if err := h.Storage.SavePhoto(photo); err != nil {
