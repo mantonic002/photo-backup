@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"photo-backup/model"
+	"time"
 
 	"github.com/rwcarlsen/goexif/exif"
 )
@@ -14,6 +15,7 @@ type PhotoStorage interface {
 
 type LocalPhotoStorage struct {
 	Directory string
+	Db        PhotoDB
 }
 
 func (s *LocalPhotoStorage) SavePhoto(photo model.Photo) error {
@@ -35,25 +37,34 @@ func (s *LocalPhotoStorage) SavePhoto(photo model.Photo) error {
 		return err
 	}
 
+	// extract exif data
+	var geoPoint model.GeoPoint
+	var takenAt time.Time
 	x, err := exif.Decode(file)
 	if err != nil {
 		log.Println("Error decoding EXIF data, proceeding without it:", err)
 		return nil
+	} else {
+		// lat/long
+		if lat, long, err := x.LatLong(); err == nil {
+			geoPoint = model.GeoPoint{
+				Type:        "Point",
+				Coordinates: []float64{long, lat},
+			}
+		}
+		// datetime
+		if tm, err := x.DateTime(); err == nil {
+			takenAt = tm
+		}
 	}
 
-	tm, err := x.DateTime()
-	if err != nil {
-		log.Println("No datetime in EXIF data:", err)
-	} else {
-		log.Println("Taken:", tm)
-	}
-
-	lat, long, err := x.LatLong()
-	if err != nil {
-		log.Println("No lat/long in EXIF data:", err)
-	} else {
-		log.Println("lat, long:", lat, ",", long)
-	}
+	s.Db.SavePhoto(model.PhotoDB{
+		Size:        photo.Size,
+		ContentType: photo.ContentType,
+		FilePath:    s.Directory + "/" + photo.Filename,
+		TakenAt:     takenAt,
+		LonLat:      geoPoint,
+	})
 
 	return nil
 }

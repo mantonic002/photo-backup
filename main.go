@@ -8,8 +8,16 @@ import (
 )
 
 func main() {
+	mongodb := &storage.MongoPhotoDB{}
+	err := mongodb.Connect("mongodb://localhost:27017", "photo_backup", "photos")
+	if err != nil {
+		log.Fatal("Failed to connect to MongoDB:", err)
+	}
+	defer mongodb.Close()
+
 	localStorage := &storage.LocalPhotoStorage{
 		Directory: "./.uploads",
+		Db:        mongodb,
 	}
 
 	apiHandlers := &api.PhotoHandlers{
