@@ -11,6 +11,7 @@ import (
 
 type PhotoStorage interface {
 	SavePhoto(photo model.Photo) error
+	GetPhoto(id string) (*model.Photo, error)
 }
 
 type LocalPhotoStorage struct {
@@ -67,4 +68,32 @@ func (s *LocalPhotoStorage) SavePhoto(photo model.Photo) error {
 	})
 
 	return nil
+}
+
+func (s *LocalPhotoStorage) GetPhoto(id string) (*model.Photo, error) {
+	photoDB, err := s.Db.GetPhoto(id)
+	if err != nil {
+		log.Println("Error retrieving photo info from mongoDB:", err)
+		return nil, err
+	}
+
+	file, err := os.Open(photoDB.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	fileContent := make([]byte, photoDB.Size)
+	_, err = file.Read(fileContent)
+	if err != nil {
+		return nil, err
+	}
+
+	photo := &model.Photo{
+		Size:        photoDB.Size,
+		ContentType: photoDB.ContentType,
+		Filename:    file.Name(),
+		FileContent: fileContent,
+	}
+	return photo, nil
 }

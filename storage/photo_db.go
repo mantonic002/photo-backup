@@ -5,19 +5,23 @@ import (
 	"log"
 	"photo-backup/model"
 
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type PhotoDB interface {
 	Connect(connectionString, databaseName, collectionName string) error
 	Close() error
 	SavePhoto(photo model.PhotoDB) error
+	GetPhoto(id string) (*model.PhotoDB, error)
 	SearchPhotos(query string) ([]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
 	mongoClient      *mongo.Client
+	collection       *mongo.Collection
 	connectionString string
 	databaseName     string
 	collectionName   string
@@ -29,7 +33,7 @@ func (db *MongoPhotoDB) Connect(connectionString, databaseName, collectionName s
 	db.databaseName = databaseName
 	db.collectionName = collectionName
 
-	db.mongoClient, err = mongo.Connect(options.Client().ApplyURI(connectionString))
+	db.mongoClient, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(connectionString))
 	if err != nil {
 		return err
 	}
@@ -38,6 +42,8 @@ func (db *MongoPhotoDB) Connect(connectionString, databaseName, collectionName s
 	if err != nil {
 		return err
 	}
+
+	db.collection = db.mongoClient.Database(db.databaseName).Collection(db.collectionName)
 
 	log.Println("Connected to MongoDB")
 	return nil
@@ -55,13 +61,31 @@ func (db *MongoPhotoDB) Close() error {
 }
 
 func (db *MongoPhotoDB) SavePhoto(photo model.PhotoDB) error {
-	collection := db.mongoClient.Database(db.databaseName).Collection(db.collectionName)
-	_, err := collection.InsertOne(context.TODO(), photo)
+	_, err := db.collection.InsertOne(context.TODO(), photo)
 	if err != nil {
 		return err
 	}
 	log.Println("Photo saved to MongoDB:", photo.FilePath)
 	return nil
+}
+
+func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
+	var photo model.PhotoDB
+
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+
+	filter := bson.D{{Key: "_id", Value: oid}}
+	err = db.collection.FindOne(context.TODO(), filter).Decode(&photo)
+
+	if err != nil {
+		log.Printf("Error getting photo info from MongoDB: %v", err)
+		return nil, err
+	}
+
+	return &photo, nil
 }
 
 func (db *MongoPhotoDB) SearchPhotos(query string) ([]model.PhotoDB, error) {

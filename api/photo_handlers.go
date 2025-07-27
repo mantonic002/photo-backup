@@ -30,7 +30,22 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 }
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "Get Photo Handler")
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "Missing id parameter", http.StatusBadRequest)
+		return
+	}
+
+	photo, err := h.Storage.GetPhoto(id)
+	if err != nil {
+		http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", photo.ContentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photo.Filename))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(photo.FileContent)
 }
 
 func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
