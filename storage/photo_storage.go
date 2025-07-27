@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"io"
 	"log"
+	"mime/multipart"
 	"os"
 	"photo-backup/model"
 	"time"
@@ -10,8 +12,8 @@ import (
 )
 
 type PhotoStorage interface {
-	SavePhoto(photo model.Photo) error
-	GetPhoto(id string) (*model.Photo, error)
+	SavePhoto(fileHeader *multipart.FileHeader) error
+	GetPhoto(id string) (*model.PhotoDB, *os.File, error)
 }
 
 type LocalPhotoStorage struct {
@@ -19,15 +21,21 @@ type LocalPhotoStorage struct {
 	Db        PhotoDB
 }
 
-func (s *LocalPhotoStorage) SavePhoto(photo model.Photo) error {
-	filePath := s.Directory + "/" + photo.Filename
-	file, err := os.Create(filePath)
+func (s *LocalPhotoStorage) SavePhoto(fileHeader *multipart.FileHeader) error {
+	filePath := s.Directory + "/" + fileHeader.Filename
+	outFile, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	file, err := fileHeader.Open()
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	_, err = file.Write(photo.FileContent)
+	size, err := io.Copy(outFile, file)
 	if err != nil {
 		return err
 	}
@@ -59,41 +67,31 @@ func (s *LocalPhotoStorage) SavePhoto(photo model.Photo) error {
 		}
 	}
 
-	s.Db.SavePhoto(model.PhotoDB{
-		Size:        photo.Size,
-		ContentType: photo.ContentType,
-		FilePath:    s.Directory + "/" + photo.Filename,
+	err = s.Db.SavePhoto(model.PhotoDB{
+		Size:        size,
+		ContentType: fileHeader.Header.Get("Content-Type"),
+		FilePath:    filePath,
 		TakenAt:     takenAt,
 		LonLat:      geoPoint,
 	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (s *LocalPhotoStorage) GetPhoto(id string) (*model.Photo, error) {
+func (s *LocalPhotoStorage) GetPhoto(id string) (*model.PhotoDB, *os.File, error) {
 	photoDB, err := s.Db.GetPhoto(id)
 	if err != nil {
 		log.Println("Error retrieving photo info from mongoDB:", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	file, err := os.Open(photoDB.FilePath)
 	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	fileContent := make([]byte, photoDB.Size)
-	_, err = file.Read(fileContent)
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	photo := &model.Photo{
-		Size:        photoDB.Size,
-		ContentType: photoDB.ContentType,
-		Filename:    file.Name(),
-		FileContent: fileContent,
-	}
-	return photo, nil
+	return photoDB, file, nil
 }

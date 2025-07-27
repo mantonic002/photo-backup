@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"mime/multipart"
 	"net/http"
-	"photo-backup/model"
 	"photo-backup/storage"
 )
 
@@ -36,16 +34,17 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	photo, err := h.Storage.GetPhoto(id)
+	photoDB, file, err := h.Storage.GetPhoto(id)
 	if err != nil {
 		http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
+	defer file.Close()
 
-	w.Header().Set("Content-Type", photo.ContentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photo.Filename))
+	w.Header().Set("Content-Type", photoDB.ContentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photoDB.FilePath))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(photo.FileContent)
+	_, _ = io.Copy(w, file)
 }
 
 func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +69,7 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 	}
 
 	for _, fileHeader := range fileHeaders {
-		if err := h.processAndStoreFile(fileHeader); err != nil {
+		if err := h.Storage.SavePhoto(fileHeader); err != nil {
 			http.Error(w, "Failed to save photo: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -80,30 +79,4 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
-}
-
-func (h *PhotoHandlers) processAndStoreFile(fileHeader *multipart.FileHeader) error {
-	file, err := fileHeader.Open()
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
-	}
-
-	photo := model.Photo{
-		Size:        fileHeader.Size,
-		ContentType: fileHeader.Header.Get("Content-Type"),
-		Filename:    fileHeader.Filename,
-		FileContent: content,
-	}
-
-	if err := h.Storage.SavePhoto(photo); err != nil {
-		return fmt.Errorf("save photo: %w", err)
-	}
-
-	return nil
 }
