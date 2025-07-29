@@ -14,6 +14,7 @@ import (
 type PhotoStorage interface {
 	SavePhoto(fileHeader *multipart.FileHeader) error
 	GetPhoto(id string) (*model.PhotoDB, *os.File, error)
+	SearchPhotosByLocation(long float64, lat float64, dist int) error
 }
 
 type LocalPhotoStorage struct {
@@ -40,8 +41,7 @@ func (s *LocalPhotoStorage) SavePhoto(fileHeader *multipart.FileHeader) error {
 		return err
 	}
 
-	// reset file pointer to beginning for EXIF decoding
-	_, err = file.Seek(0, 0)
+	exifFile, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,8 @@ func (s *LocalPhotoStorage) SavePhoto(fileHeader *multipart.FileHeader) error {
 	// extract exif data
 	var geoPoint model.GeoPoint
 	var takenAt time.Time
-	x, err := exif.Decode(file)
+	// Reopen for EXIF
+	x, err := exif.Decode(exifFile)
 	if err != nil {
 		log.Println("Error decoding EXIF data, proceeding without it:", err)
 		return nil
@@ -94,4 +95,13 @@ func (s *LocalPhotoStorage) GetPhoto(id string) (*model.PhotoDB, *os.File, error
 	}
 
 	return photoDB, file, nil
+}
+
+func (s *LocalPhotoStorage) SearchPhotosByLocation(long float64, lat float64, dist int) error {
+	_, err := s.Db.SearchPhotosByLocation(long, lat, dist)
+	if err != nil {
+		log.Println("Error retrieving photos info from mongoDB:", err)
+		return err
+	}
+	return nil
 }

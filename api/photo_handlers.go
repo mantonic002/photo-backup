@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"photo-backup/storage"
+	"strconv"
 )
 
 type PhotoHandlers struct {
@@ -21,6 +22,15 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 		case http.MethodPost:
 			h.handleUploadPhoto(w, r)
 		default:
+			log.Println("Unsupported method:", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/photos/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			h.handleSearchPhoto(w, r)
+		} else {
 			log.Println("Unsupported method:", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -79,4 +89,32 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
+}
+
+func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request) {
+	longStr := r.URL.Query().Get("long")
+	latStr := r.URL.Query().Get("lat")
+	distStr := r.URL.Query().Get("dist")
+	if longStr == "" || latStr == "" || distStr == "" {
+		http.Error(w, "Missing parameter", http.StatusBadRequest)
+		return
+	}
+
+	long, err := strconv.ParseFloat(longStr, 64)
+	if err != nil {
+		http.Error(w, "Invalid longitude value", http.StatusBadRequest)
+		return
+	}
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		http.Error(w, "Invalid latitude value", http.StatusBadRequest)
+		return
+	}
+	dist, err := strconv.Atoi(distStr)
+	if err != nil {
+		http.Error(w, "Invalid distance value", http.StatusBadRequest)
+		return
+	}
+
+	h.Storage.SearchPhotosByLocation(long, lat, dist)
 }

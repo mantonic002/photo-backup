@@ -16,7 +16,7 @@ type PhotoDB interface {
 	Close() error
 	SavePhoto(photo model.PhotoDB) error
 	GetPhoto(id string) (*model.PhotoDB, error)
-	SearchPhotos(query string) ([]model.PhotoDB, error)
+	SearchPhotosByLocation(long float64, lat float64, dist int) (*[]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
@@ -88,6 +88,34 @@ func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
 	return &photo, nil
 }
 
-func (db *MongoPhotoDB) SearchPhotos(query string) ([]model.PhotoDB, error) {
-	return nil, nil
+func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist int) (*[]model.PhotoDB, error) {
+	var photos []model.PhotoDB
+
+	var geoPoint = model.GeoPoint{
+		Type:        "Point",
+		Coordinates: []float64{long, lat},
+	}
+
+	filter := bson.D{
+		{Key: "lonlat", Value: bson.D{
+			{Key: "$near", Value: bson.D{
+				{Key: "$geometry", Value: geoPoint},
+				{Key: "$maxDistance", Value: dist},
+			}},
+		}},
+	}
+
+	output, err := db.collection.Find(context.TODO(), filter)
+	if err != nil {
+		return nil, err
+	}
+	if err = output.All(context.TODO(), &photos); err != nil {
+		return nil, err
+	}
+
+	for _, photo := range photos {
+		log.Println(photo)
+	}
+
+	return &photos, nil
 }
