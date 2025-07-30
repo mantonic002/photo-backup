@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if id != "" {
+	if id != "" { // single photo, return full size photo
 		photoDB, file, err := h.Storage.GetPhoto(id)
 		if err != nil {
 			http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
@@ -59,13 +60,51 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photoDB.FilePath))
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.Copy(w, file)
-	} else if limitStr != "" {
+	} else if limitStr != "" { // multiple photos, return thumbnails
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil {
 			http.Error(w, "Invalid distance value", http.StatusBadRequest)
 			return
 		}
-		h.Storage.GetPhotos(lastId, int64(limit))
+
+		photos, err := h.Storage.GetPhotos(lastId, int64(limit))
+		if err != nil {
+			http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if len(photos) == 0 {
+			http.Error(w, "No photos found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"photos.zip\"")
+		w.WriteHeader(http.StatusOK)
+
+		zipWriter := zip.NewWriter(w)
+		defer zipWriter.Close()
+
+		for _, photo := range photos {
+			defer photo.Close()
+			zipFile, err := zipWriter.Create(photo.Name())
+			if err != nil {
+				fmt.Printf("Failed to create zip for %s: %v\n", photo.Name(), err)
+				return
+			}
+
+			_, err = io.Copy(zipFile, photo)
+			if err != nil {
+				fmt.Printf("Failed to write photo %s to zip: %v\n", photo.Name(), err)
+				return
+			}
+		}
+
+		err = zipWriter.Close()
+		if err != nil {
+			fmt.Printf("Failed to close zip writer: %v\n", err)
+			return
+		}
 	}
 }
 
@@ -128,5 +167,42 @@ func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.Storage.SearchPhotosByLocation(long, lat, dist)
+	photos, err := h.Storage.SearchPhotosByLocation(long, lat, dist)
+	if err != nil {
+		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(photos) == 0 {
+		http.Error(w, "No photos found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"photos.zip\"")
+	w.WriteHeader(http.StatusOK)
+
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	for _, photo := range photos {
+		defer photo.Close()
+		zipFile, err := zipWriter.Create(photo.Name())
+		if err != nil {
+			fmt.Printf("Failed to create zip for %s: %v\n", photo.Name(), err)
+			return
+		}
+
+		_, err = io.Copy(zipFile, photo)
+		if err != nil {
+			fmt.Printf("Failed to write photo %s to zip: %v\n", photo.Name(), err)
+			return
+		}
+	}
+
+	err = zipWriter.Close()
+	if err != nil {
+		fmt.Printf("Failed to close zip writer: %v\n", err)
+		return
+	}
 }
