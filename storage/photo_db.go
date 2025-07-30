@@ -16,7 +16,8 @@ type PhotoDB interface {
 	Close() error
 	SavePhoto(photo model.PhotoDB) error
 	GetPhoto(id string) (*model.PhotoDB, error)
-	SearchPhotosByLocation(long float64, lat float64, dist int) (*[]model.PhotoDB, error)
+	GetPhotos(lastIdString string, limit int64) ([]model.PhotoDB, error)
+	SearchPhotosByLocation(long float64, lat float64, dist int) ([]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
@@ -88,7 +89,35 @@ func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
 	return &photo, nil
 }
 
-func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist int) (*[]model.PhotoDB, error) {
+func (db *MongoPhotoDB) GetPhotos(lastIdString string, limit int64) ([]model.PhotoDB, error) {
+	var photos []model.PhotoDB
+
+	filter := bson.M{}
+	if lastIdString != "" {
+		lastId, err := primitive.ObjectIDFromHex(lastIdString)
+		if err != nil {
+			return nil, err
+		}
+		filter = bson.M{"_id": bson.M{"$gt": lastId}}
+	}
+
+	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": 1})
+	output, err := db.collection.Find(context.TODO(), filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err = output.All(context.TODO(), &photos); err != nil {
+		return nil, err
+	}
+
+	for _, photo := range photos {
+		log.Println(photo)
+	}
+
+	return photos, nil
+}
+
+func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist int) ([]model.PhotoDB, error) {
 	var photos []model.PhotoDB
 
 	var geoPoint = model.GeoPoint{
@@ -117,5 +146,5 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist i
 		log.Println(photo)
 	}
 
-	return &photos, nil
+	return photos, nil
 }

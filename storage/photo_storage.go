@@ -14,6 +14,7 @@ import (
 type PhotoStorage interface {
 	SavePhoto(fileHeader *multipart.FileHeader) error
 	GetPhoto(id string) (*model.PhotoDB, *os.File, error)
+	GetPhotos(lastIdString string, limit int64) error
 	SearchPhotosByLocation(long float64, lat float64, dist int) error
 }
 
@@ -95,6 +96,15 @@ func (s *LocalPhotoStorage) GetPhoto(id string) (*model.PhotoDB, *os.File, error
 	}
 
 	return photoDB, file, nil
+}
+
+func (s *LocalPhotoStorage) GetPhotos(lastIdString string, limit int64) error {
+	_, err := s.Db.GetPhotos(lastIdString, limit)
+	if err != nil {
+		log.Println("Error retrieving photos info from mongoDB:", err)
+		return err
+	}
+	return nil
 }
 
 func (s *LocalPhotoStorage) SearchPhotosByLocation(long float64, lat float64, dist int) error {

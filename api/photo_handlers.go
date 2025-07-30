@@ -39,22 +39,34 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "Missing id parameter", http.StatusBadRequest)
+	lastId := r.URL.Query().Get("lastId")
+	limitStr := r.URL.Query().Get("limit")
+
+	if id == "" && limitStr == "" {
+		http.Error(w, "Missing necessary parameters", http.StatusBadRequest)
 		return
 	}
 
-	photoDB, file, err := h.Storage.GetPhoto(id)
-	if err != nil {
-		http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
-		return
-	}
-	defer file.Close()
+	if id != "" {
+		photoDB, file, err := h.Storage.GetPhoto(id)
+		if err != nil {
+			http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		defer file.Close()
 
-	w.Header().Set("Content-Type", photoDB.ContentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photoDB.FilePath))
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, file)
+		w.Header().Set("Content-Type", photoDB.ContentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photoDB.FilePath))
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, file)
+	} else if limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			http.Error(w, "Invalid distance value", http.StatusBadRequest)
+			return
+		}
+		h.Storage.GetPhotos(lastId, int64(limit))
+	}
 }
 
 func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
