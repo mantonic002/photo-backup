@@ -15,9 +15,6 @@ import (
 
 type PhotoStorage interface {
 	SavePhoto(fileHeader *multipart.FileHeader) error
-	GetPhoto(id string) (*model.PhotoDB, *os.File, error)
-	GetPhotos(lastIdString string, limit int64) ([]*os.File, error)
-	SearchPhotosByLocation(long float64, lat float64, dist int) ([]*os.File, error)
 }
 
 type LocalPhotoStorage struct {
@@ -110,57 +107,4 @@ func generateThumbnail(filePath string) (string, error) {
 		return "", err
 	}
 	return thumbnailPath, nil
-}
-
-func (s *LocalPhotoStorage) GetPhoto(id string) (*model.PhotoDB, *os.File, error) {
-	photoDB, err := s.Db.GetPhoto(id)
-	if err != nil {
-		log.Println("Error retrieving photo info from mongoDB:", err)
-		return nil, nil, err
-	}
-
-	file, err := os.Open(photoDB.FilePath)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return photoDB, file, nil
-}
-
-func (s *LocalPhotoStorage) GetPhotos(lastIdString string, limit int64) ([]*os.File, error) {
-	dbPhotos, err := s.Db.GetPhotos(lastIdString, limit)
-	if err != nil {
-		log.Println("Error retrieving photos info from mongoDB:", err)
-		return nil, err
-	}
-	var thumbnails []*os.File
-
-	for _, dbPhoto := range dbPhotos {
-		file, err := os.Open(dbPhoto.ThumbnailPath)
-		if err != nil {
-			return nil, err
-		}
-		thumbnails = append(thumbnails, file)
-	}
-
-	return thumbnails, nil
-}
-
-func (s *LocalPhotoStorage) SearchPhotosByLocation(long float64, lat float64, dist int) ([]*os.File, error) {
-	dbPhotos, err := s.Db.SearchPhotosByLocation(long, lat, dist)
-	if err != nil {
-		log.Println("Error retrieving photos info from mongoDB:", err)
-		return nil, err
-	}
-	var thumbnails []*os.File
-
-	for _, dbPhoto := range dbPhotos {
-		file, err := os.Open(dbPhoto.ThumbnailPath)
-		if err != nil {
-			return nil, err
-		}
-		thumbnails = append(thumbnails, file)
-	}
-
-	return thumbnails, nil
 }

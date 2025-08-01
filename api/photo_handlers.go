@@ -1,10 +1,7 @@
 package api
 
 import (
-	"archive/zip"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"photo-backup/storage"
@@ -13,6 +10,7 @@ import (
 
 type PhotoHandlers struct {
 	Storage storage.PhotoStorage
+	Db      storage.PhotoDB
 }
 
 func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
@@ -36,6 +34,8 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+
+	mux.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
 }
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
@@ -49,17 +49,16 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if id != "" { // single photo, return full size photo
-		photoDB, file, err := h.Storage.GetPhoto(id)
+		photo, err := h.Db.GetPhoto(id)
 		if err != nil {
 			http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
 			return
 		}
-		defer file.Close()
 
-		w.Header().Set("Content-Type", photoDB.ContentType)
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", photoDB.FilePath))
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, file)
+		json.NewEncoder(w).Encode(photo)
+
 	} else if limitStr != "" { // multiple photos, return thumbnails
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil {
@@ -67,7 +66,7 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		photos, err := h.Storage.GetPhotos(lastId, int64(limit))
+		photos, err := h.Db.GetPhotos(lastId, int64(limit))
 		if err != nil {
 			http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -78,33 +77,9 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", "attachment; filename=\"photos.zip\"")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-
-		zipWriter := zip.NewWriter(w)
-		defer zipWriter.Close()
-
-		for _, photo := range photos {
-			defer photo.Close()
-			zipFile, err := zipWriter.Create(photo.Name())
-			if err != nil {
-				fmt.Printf("Failed to create zip for %s: %v\n", photo.Name(), err)
-				return
-			}
-
-			_, err = io.Copy(zipFile, photo)
-			if err != nil {
-				fmt.Printf("Failed to write photo %s to zip: %v\n", photo.Name(), err)
-				return
-			}
-		}
-
-		err = zipWriter.Close()
-		if err != nil {
-			fmt.Printf("Failed to close zip writer: %v\n", err)
-			return
-		}
+		json.NewEncoder(w).Encode(photos)
 	}
 }
 
@@ -167,7 +142,7 @@ func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	photos, err := h.Storage.SearchPhotosByLocation(long, lat, dist)
+	photos, err := h.Db.SearchPhotosByLocation(long, lat, dist)
 	if err != nil {
 		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -178,31 +153,7 @@ func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"photos.zip\"")
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	zipWriter := zip.NewWriter(w)
-	defer zipWriter.Close()
-
-	for _, photo := range photos {
-		defer photo.Close()
-		zipFile, err := zipWriter.Create(photo.Name())
-		if err != nil {
-			fmt.Printf("Failed to create zip for %s: %v\n", photo.Name(), err)
-			return
-		}
-
-		_, err = io.Copy(zipFile, photo)
-		if err != nil {
-			fmt.Printf("Failed to write photo %s to zip: %v\n", photo.Name(), err)
-			return
-		}
-	}
-
-	err = zipWriter.Close()
-	if err != nil {
-		fmt.Printf("Failed to close zip writer: %v\n", err)
-		return
-	}
+	json.NewEncoder(w).Encode(photos)
 }

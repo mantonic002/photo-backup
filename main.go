@@ -22,6 +22,7 @@ func main() {
 
 	apiHandlers := &api.PhotoHandlers{
 		Storage: localStorage,
+		Db:      mongodb,
 	}
 	mux := http.NewServeMux()
 	apiHandlers.ServeHTTP(mux)
