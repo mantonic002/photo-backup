@@ -12,12 +12,12 @@ import (
 )
 
 type PhotoDB interface {
-	Connect(connectionString, databaseName, collectionName string) error
-	Close() error
-	SavePhoto(photo model.PhotoDB) error
-	GetPhoto(id string) (*model.PhotoDB, error)
-	GetPhotos(lastIdString string, limit int64) ([]model.PhotoDB, error)
-	SearchPhotosByLocation(long float64, lat float64, dist int) ([]model.PhotoDB, error)
+	Connect(ctx context.Context, connectionString, databaseName, collectionName string) error
+	Close(ctx context.Context) error
+	SavePhoto(ctx context.Context, photo model.PhotoDB) error
+	GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error)
+	GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error)
+	SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
@@ -28,18 +28,18 @@ type MongoPhotoDB struct {
 	collectionName   string
 }
 
-func (db *MongoPhotoDB) Connect(connectionString, databaseName, collectionName string) error {
+func (db *MongoPhotoDB) Connect(ctx context.Context, connectionString, databaseName, collectionName string) error {
 	var err error
 	db.connectionString = connectionString
 	db.databaseName = databaseName
 	db.collectionName = collectionName
 
-	db.mongoClient, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(connectionString))
+	db.mongoClient, err = mongo.Connect(ctx, options.Client().ApplyURI(connectionString))
 	if err != nil {
 		return err
 	}
 
-	err = db.mongoClient.Ping(context.TODO(), nil)
+	err = db.mongoClient.Ping(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -50,9 +50,9 @@ func (db *MongoPhotoDB) Connect(connectionString, databaseName, collectionName s
 	return nil
 }
 
-func (db *MongoPhotoDB) Close() error {
+func (db *MongoPhotoDB) Close(ctx context.Context) error {
 	if db.mongoClient != nil {
-		err := db.mongoClient.Disconnect(context.TODO())
+		err := db.mongoClient.Disconnect(ctx)
 		if err != nil {
 			return err
 		}
@@ -61,8 +61,8 @@ func (db *MongoPhotoDB) Close() error {
 	return nil
 }
 
-func (db *MongoPhotoDB) SavePhoto(photo model.PhotoDB) error {
-	_, err := db.collection.InsertOne(context.TODO(), photo)
+func (db *MongoPhotoDB) SavePhoto(ctx context.Context, photo model.PhotoDB) error {
+	_, err := db.collection.InsertOne(ctx, photo)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (db *MongoPhotoDB) SavePhoto(photo model.PhotoDB) error {
 	return nil
 }
 
-func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
+func (db *MongoPhotoDB) GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error) {
 	var photo model.PhotoDB
 
 	oid, err := primitive.ObjectIDFromHex(id)
@@ -79,7 +79,7 @@ func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
 	}
 
 	filter := bson.D{{Key: "_id", Value: oid}}
-	err = db.collection.FindOne(context.TODO(), filter).Decode(&photo)
+	err = db.collection.FindOne(ctx, filter).Decode(&photo)
 
 	if err != nil {
 		log.Printf("Error getting photo info from MongoDB: %v", err)
@@ -89,7 +89,7 @@ func (db *MongoPhotoDB) GetPhoto(id string) (*model.PhotoDB, error) {
 	return &photo, nil
 }
 
-func (db *MongoPhotoDB) GetPhotos(lastIdString string, limit int64) ([]model.PhotoDB, error) {
+func (db *MongoPhotoDB) GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error) {
 	var photos []model.PhotoDB
 
 	filter := bson.M{}
@@ -102,11 +102,11 @@ func (db *MongoPhotoDB) GetPhotos(lastIdString string, limit int64) ([]model.Pho
 	}
 
 	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": 1})
-	output, err := db.collection.Find(context.TODO(), filter, opts)
+	output, err := db.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err = output.All(context.TODO(), &photos); err != nil {
+	if err = output.All(ctx, &photos); err != nil {
 		return nil, err
 	}
 
@@ -117,7 +117,7 @@ func (db *MongoPhotoDB) GetPhotos(lastIdString string, limit int64) ([]model.Pho
 	return photos, nil
 }
 
-func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist int) ([]model.PhotoDB, error) {
+func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error) {
 	var photos []model.PhotoDB
 
 	var geoPoint = model.GeoPoint{
@@ -134,11 +134,11 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(long float64, lat float64, dist i
 		}},
 	}
 
-	output, err := db.collection.Find(context.TODO(), filter)
+	output, err := db.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	if err = output.All(context.TODO(), &photos); err != nil {
+	if err = output.All(ctx, &photos); err != nil {
 		return nil, err
 	}
 

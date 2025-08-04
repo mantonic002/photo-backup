@@ -39,6 +39,7 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 }
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := r.URL.Query().Get("id")
 	lastId := r.URL.Query().Get("lastId")
 	limitStr := r.URL.Query().Get("limit")
@@ -49,7 +50,7 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if id != "" { // single photo, return full size photo
-		photo, err := h.Db.GetPhoto(id)
+		photo, err := h.Db.GetPhoto(ctx, id)
 		if err != nil {
 			http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
 			return
@@ -66,7 +67,7 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		photos, err := h.Db.GetPhotos(lastId, int64(limit))
+		photos, err := h.Db.GetPhotos(ctx, lastId, int64(limit))
 		if err != nil {
 			http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -84,6 +85,8 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	const maxSize = 200 * 1024 * 1024 // 200 MB
 
 	if r.ContentLength > maxSize {
@@ -105,7 +108,7 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 	}
 
 	for _, fileHeader := range fileHeaders {
-		if err := h.Storage.SavePhoto(fileHeader); err != nil {
+		if err := h.Storage.SavePhoto(ctx, fileHeader); err != nil {
 			http.Error(w, "Failed to save photo: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -118,6 +121,8 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 }
 
 func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	longStr := r.URL.Query().Get("long")
 	latStr := r.URL.Query().Get("lat")
 	distStr := r.URL.Query().Get("dist")
@@ -142,7 +147,7 @@ func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	photos, err := h.Db.SearchPhotosByLocation(long, lat, dist)
+	photos, err := h.Db.SearchPhotosByLocation(ctx, long, lat, dist)
 	if err != nil {
 		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"log"
 	"mime/multipart"
@@ -14,7 +15,7 @@ import (
 )
 
 type PhotoStorage interface {
-	SavePhoto(fileHeader *multipart.FileHeader) error
+	SavePhoto(ctx context.Context, fileHeader *multipart.FileHeader) error
 }
 
 type LocalPhotoStorage struct {
@@ -22,7 +23,7 @@ type LocalPhotoStorage struct {
 	Db        PhotoDB
 }
 
-func (s *LocalPhotoStorage) SavePhoto(fileHeader *multipart.FileHeader) error {
+func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart.FileHeader) error {
 	filePath := s.Directory + "/" + fileHeader.Filename
 	outFile, err := os.Create(filePath)
 	if err != nil {
@@ -74,7 +75,7 @@ func (s *LocalPhotoStorage) SavePhoto(fileHeader *multipart.FileHeader) error {
 		return err
 	}
 
-	err = s.Db.SavePhoto(model.PhotoDB{
+	err = s.Db.SavePhoto(ctx, model.PhotoDB{
 		Size:          size,
 		ContentType:   fileHeader.Header.Get("Content-Type"),
 		FilePath:      filePath,

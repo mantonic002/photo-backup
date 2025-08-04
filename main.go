@@ -1,19 +1,37 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
 	"photo-backup/api"
 	"photo-backup/storage"
+	"time"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	_ = godotenv.Load()
+
+	mongoURI := os.Getenv("MONGO_URI")
+	mongoDB := os.Getenv("MONGO_DB")
+	mongoCollection := os.Getenv("MONGO_COLLECTION")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	mongodb := &storage.MongoPhotoDB{}
-	err := mongodb.Connect("mongodb://localhost:27017", "photo_backup", "photos")
+	err := mongodb.Connect(ctx, mongoURI, mongoDB, mongoCollection)
 	if err != nil {
 		log.Fatal("Failed to connect to MongoDB:", err)
 	}
-	defer mongodb.Close()
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
+		mongodb.Close(closeCtx)
+	}()
 
 	localStorage := &storage.LocalPhotoStorage{
 		Directory: "./.uploads",
