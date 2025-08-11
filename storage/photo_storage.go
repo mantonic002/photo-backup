@@ -2,16 +2,19 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"os"
+	"path/filepath"
 	"photo-backup/model"
-	"strings"
 	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/rwcarlsen/goexif/exif"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type PhotoStorage interface {
@@ -24,88 +27,123 @@ type LocalPhotoStorage struct {
 }
 
 func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart.FileHeader) error {
-	filePath := s.Directory + "/" + fileHeader.Filename
-	outFile, err := os.Create(filePath)
-	if err != nil {
-		return err
+	if fileHeader == nil {
+		return fmt.Errorf("file header cannot be nil")
 	}
-	defer outFile.Close()
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
-	size, err := io.Copy(outFile, file)
+	// temp file
+	tmpFile, err := os.CreateTemp("", "photo-*.tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpFilePath := tmpFile.Name()
+	defer os.Remove(tmpFilePath)
+
+	if _, err := io.Copy(tmpFile, file); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to copy file to temp: %w", err)
 	}
 
-	exifFile, err := os.Open(filePath)
-	if err != nil {
-		return err
+	// close the temp file
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
 	}
-	defer exifFile.Close()
 
-	// extract exif data
+	// open temp file for EXIF
+	tmpFile, err = os.Open(tmpFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to reopen temp file for EXIF: %w", err)
+	}
+	defer tmpFile.Close()
+
+	// extract EXIF data
 	var geoPoint model.GeoPoint
 	var takenAt time.Time
-	// Reopen for EXIF
-	x, err := exif.Decode(exifFile)
+	exifData, err := exif.Decode(tmpFile)
 	if err != nil {
-		log.Println("Error decoding EXIF data, proceeding without it:", err)
-		return nil
+		log.Printf("Error decoding EXIF data, proceeding without it: %v", err)
 	} else {
-		// lat/long
-		if lat, long, err := x.LatLong(); err == nil {
+		if lat, long, err := exifData.LatLong(); err == nil {
 			geoPoint = model.GeoPoint{
 				Type:        "Point",
 				Coordinates: []float64{long, lat},
 			}
 		}
-		// datetime
-		if tm, err := x.DateTime(); err == nil {
+		if tm, err := exifData.DateTime(); err == nil {
 			takenAt = tm
+		} else {
+			takenAt = time.Now()
 		}
 	}
 
-	thumbnailPath, err := generateThumbnail(filePath)
-	if err != nil {
-		return err
+	tmpFile.Close()
+
+	// extract extension
+	extension := filepath.Ext(fileHeader.Filename)
+	if extension == "" {
+		contentType := fileHeader.Header.Get("Content-Type")
+		extensions, _ := mime.ExtensionsByType(contentType)
+		if len(extensions) > 0 {
+			extension = extensions[0]
+		} else {
+			extension = ".jpg"
+		}
 	}
 
-	err = s.Db.SavePhoto(ctx, model.PhotoDB{
-		Size:          size,
+	id := primitive.NewObjectIDFromTimestamp(takenAt)
+	fileName := id.Hex() + extension
+	thumbName := id.Hex() + "_thumb" + extension
+	filePath := filepath.Join(s.Directory, fileName)
+	thumbPath := filepath.Join(s.Directory, thumbName)
+
+	// move temp file to final destination
+	log.Printf("Attempting to rename %s to %s", tmpFilePath, filePath)
+	if err := os.Rename(tmpFilePath, filePath); err != nil {
+		return fmt.Errorf("failed to move temp file to %s: %w", filePath, err)
+	}
+
+	err = generateThumbnail(filePath, thumbPath)
+	if err != nil {
+		os.Remove(filePath) // clean up main file
+		return fmt.Errorf("failed to generate thumbnail: %w", err)
+	}
+
+	// save to mongo
+	photo := model.PhotoDB{
+		ID:            id,
+		Size:          fileHeader.Size,
 		ContentType:   fileHeader.Header.Get("Content-Type"),
 		FilePath:      filePath,
-		ThumbnailPath: thumbnailPath,
+		ThumbnailPath: thumbPath,
 		TakenAt:       takenAt,
 		LonLat:        geoPoint,
-	})
-	if err != nil {
-		return err
+	}
+	if _, err := s.Db.SavePhoto(ctx, photo); err != nil {
+		// clean up files if database save fails
+		os.Remove(filePath)
+		os.Remove(thumbPath)
+		return fmt.Errorf("failed to save photo metadata: %w", err)
 	}
 
 	return nil
 }
 
-func generateThumbnail(filePath string) (string, error) {
+func generateThumbnail(filePath, thumbnailPath string) error {
 	src, err := imaging.Open(filePath, imaging.AutoOrientation(true))
 	if err != nil {
-		return "", err
+		return err
 	}
-
-	splitPath := strings.Split(filePath, ".")
-	fileExtension := splitPath[len(splitPath)-1]
-	pathNoExtension := strings.Join(splitPath[0:len(splitPath)-1], ".")
-
-	thumbnailPath := pathNoExtension + "_thumb." + fileExtension
 
 	dst := imaging.Fill(src, 100, 100, imaging.Center, imaging.Lanczos)
 	err = imaging.Save(dst, thumbnailPath)
 	if err != nil {
-		return "", err
+		return err
 	}
-	return thumbnailPath, nil
+	return nil
 }

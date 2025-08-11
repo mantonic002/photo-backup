@@ -14,7 +14,7 @@ import (
 type PhotoDB interface {
 	Connect(ctx context.Context, connectionString, databaseName, collectionName string) error
 	Close(ctx context.Context) error
-	SavePhoto(ctx context.Context, photo model.PhotoDB) error
+	SavePhoto(ctx context.Context, photo model.PhotoDB) (*model.PhotoDB, error)
 	GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error)
 	SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error)
@@ -61,13 +61,18 @@ func (db *MongoPhotoDB) Close(ctx context.Context) error {
 	return nil
 }
 
-func (db *MongoPhotoDB) SavePhoto(ctx context.Context, photo model.PhotoDB) error {
-	_, err := db.collection.InsertOne(ctx, photo)
+func (db *MongoPhotoDB) SavePhoto(ctx context.Context, photo model.PhotoDB) (*model.PhotoDB, error) {
+	savedPhoto, err := db.collection.InsertOne(ctx, photo)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.Println("Photo saved to MongoDB:", photo.FilePath)
-	return nil
+	oid, ok := savedPhoto.InsertedID.(primitive.ObjectID)
+	if !ok {
+		return nil, mongo.ErrInvalidIndexValue
+	}
+	photo.ID = oid
+	return &photo, nil
 }
 
 func (db *MongoPhotoDB) GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error) {
