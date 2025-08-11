@@ -38,10 +38,7 @@ func main() {
 		Db:        mongodb,
 	}
 
-	apiHandlers := &api.PhotoHandlers{
-		Storage: localStorage,
-		Db:      mongodb,
-	}
+	apiHandlers := api.NewPhotoHandlers(localStorage, mongodb)
 	mux := http.NewServeMux()
 	apiHandlers.ServeHTTP(mux)
 

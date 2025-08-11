@@ -147,9 +147,5 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context, long float64
 		return nil, err
 	}
 
-	for _, photo := range photos {
-		log.Println(photo)
-	}
-
 	return photos, nil
 }

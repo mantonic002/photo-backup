@@ -4,38 +4,67 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"photo-backup/storage"
 	"strconv"
 )
 
 type PhotoHandlers struct {
-	Storage storage.PhotoStorage
-	Db      storage.PhotoDB
+	Storage   storage.PhotoStorage
+	Db        storage.PhotoDB
+	SecretKey string
+}
+
+type LoginRequest struct {
+	Password string `json:"password"`
+}
+
+func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB) *PhotoHandlers {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		log.Fatal("JWT_SECRET is empty")
+	}
+	return &PhotoHandlers{
+		Storage:   storage,
+		Db:        db,
+		SecretKey: secret,
+	}
 }
 
 func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
-	mux.HandleFunc("/photos", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			h.handleGetPhoto(w, r)
-		case http.MethodPost:
-			h.handleUploadPhoto(w, r)
-		default:
-			log.Println("Unsupported method:", r.Method)
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	mux.HandleFunc("/login", recoveryMiddleware(h.handleLogin))
 
-	mux.HandleFunc("/photos/search", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			h.handleSearchPhoto(w, r)
-		} else {
-			log.Println("Unsupported method:", r.Method)
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	mux.HandleFunc("/photos",
+		recoveryMiddleware(
+			h.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					h.handleGetPhoto(w, r)
+				case http.MethodPost:
+					h.handleUploadPhoto(w, r)
+				default:
+					log.Println("Unsupported method:", r.Method)
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			})))
 
-	mux.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
+	mux.HandleFunc("/photos/search",
+		recoveryMiddleware(
+			h.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					h.handleSearchPhoto(w, r)
+				} else {
+					log.Println("Unsupported method:", r.Method)
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			})))
+
+	mux.Handle("/files/",
+		recoveryMiddleware(
+			h.authMiddleware(
+				http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))).ServeHTTP,
+			),
+		))
 }
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
