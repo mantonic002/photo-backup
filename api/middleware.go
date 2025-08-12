@@ -4,8 +4,10 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"go.uber.org/zap"
 )
 
 func recoveryMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -50,4 +52,40 @@ func (h *PhotoHandlers) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+func RequestLoggerMiddleware(logger *zap.Logger, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		logger.Info("received HTTP request",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.Time("timestamp", start),
+		)
+
+		wrappedWriter := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next(wrappedWriter, r)
+
+		duration := time.Since(start)
+
+		logger.Info("completed HTTP request",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.Int("status_code", wrappedWriter.statusCode),
+			zap.Duration("duration", duration),
+		)
+	}
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }

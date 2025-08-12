@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"mime/multipart"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/rwcarlsen/goexif/exif"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.uber.org/zap"
 )
 
 type PhotoStorage interface {
@@ -24,15 +24,18 @@ type PhotoStorage interface {
 type LocalPhotoStorage struct {
 	Directory string
 	Db        PhotoDB
+	Log       *zap.Logger
 }
 
 func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart.FileHeader) error {
 	if fileHeader == nil {
+		s.Log.Error("file header is nil")
 		return fmt.Errorf("file header cannot be nil")
 	}
 
 	file, err := fileHeader.Open()
 	if err != nil {
+		s.Log.Error("failed to open file", zap.Error(err))
 		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
@@ -40,6 +43,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	// temp file
 	tmpFile, err := os.CreateTemp("", "photo-*.tmp")
 	if err != nil {
+		s.Log.Error("failed to create temp file", zap.Error(err))
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpFilePath := tmpFile.Name()
@@ -47,17 +51,20 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 
 	if _, err := io.Copy(tmpFile, file); err != nil {
 		tmpFile.Close()
+		s.Log.Error("failed to copy file to temp", zap.Error(err), zap.String("temp_path", tmpFilePath))
 		return fmt.Errorf("failed to copy file to temp: %w", err)
 	}
 
 	// close the temp file
 	if err := tmpFile.Close(); err != nil {
+		s.Log.Error("failed to close temp file", zap.Error(err), zap.String("temp_path", tmpFilePath))
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
 	// open temp file for EXIF
 	tmpFile, err = os.Open(tmpFilePath)
 	if err != nil {
+		s.Log.Error("failed to reopen temp file for EXIF", zap.Error(err), zap.String("temp_path", tmpFilePath))
 		return fmt.Errorf("failed to reopen temp file for EXIF: %w", err)
 	}
 	defer tmpFile.Close()
@@ -67,7 +74,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	var takenAt time.Time
 	exifData, err := exif.Decode(tmpFile)
 	if err != nil {
-		log.Printf("Error decoding EXIF data, proceeding without it: %v", err)
+		s.Log.Warn("failed to decode EXIF data, using defaults", zap.Error(err))
 	} else {
 		if lat, long, err := exifData.LatLong(); err == nil {
 			geoPoint = model.GeoPoint{
@@ -91,8 +98,10 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		extensions, _ := mime.ExtensionsByType(contentType)
 		if len(extensions) > 0 {
 			extension = extensions[0]
+			s.Log.Debug("using extension from content type", zap.String("extension", extension), zap.String("content_type", contentType))
 		} else {
 			extension = ".jpg"
+			s.Log.Warn("no extension found, defaulting to .jpg", zap.String("content_type", contentType))
 		}
 	}
 
@@ -102,15 +111,15 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	filePath := filepath.Join(s.Directory, fileName)
 	thumbPath := filepath.Join(s.Directory, thumbName)
 
-	// move temp file to final destination
-	log.Printf("Attempting to rename %s to %s", tmpFilePath, filePath)
 	if err := os.Rename(tmpFilePath, filePath); err != nil {
+		s.Log.Error("failed to move temp file", zap.Error(err), zap.String("file_path", filePath))
 		return fmt.Errorf("failed to move temp file to %s: %w", filePath, err)
 	}
 
 	err = generateThumbnail(filePath, thumbPath)
 	if err != nil {
 		os.Remove(filePath) // clean up main file
+		s.Log.Error("failed to generate thumbnail", zap.Error(err), zap.String("thumb_path", thumbPath))
 		return fmt.Errorf("failed to generate thumbnail: %w", err)
 	}
 
@@ -128,9 +137,11 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		// clean up files if database save fails
 		os.Remove(filePath)
 		os.Remove(thumbPath)
+		s.Log.Error("failed to save photo metadata to database", zap.Error(err), zap.String("file_path", filePath))
 		return fmt.Errorf("failed to save photo metadata: %w", err)
 	}
 
+	s.Log.Info("photo saved successfully", zap.String("file_path", filePath), zap.String("photo_id", id.Hex()))
 	return nil
 }
 
