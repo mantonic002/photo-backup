@@ -13,7 +13,8 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	_ = godotenv.Load(".env")
+	_ = godotenv.Overload(".env.secret")
 
 	mongoURI := os.Getenv("MONGO_URI")
 	mongoDB := os.Getenv("MONGO_DB")

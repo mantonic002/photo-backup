@@ -3,10 +3,17 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
+
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
 
 func (h *PhotoHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -20,8 +27,8 @@ func (h *PhotoHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: hashed password in config
-	if req.Password != "pw1234" {
+	pwHash := os.Getenv("PW")
+	if !CheckPasswordHash(req.Password, pwHash) {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
