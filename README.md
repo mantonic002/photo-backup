@@ -170,7 +170,7 @@ The server will start on `http://localhost:8080`.
    ```
 
 5. **Retrieve a Served File**:
-   To retrieve a full-size photo or thumbnail from the .Uploads directory, use the /file`s/<filename>` endpoint. The filename can be obtained from the FilePath or ThumbnailPath fields in the response from the `/photos` or `/photos/search` endpoints.
+   To retrieve a full-size photo or thumbnail from the .Uploads directory, use the `/files/<filename>` endpoint. The filename can be obtained from the FilePath or ThumbnailPath fields in the response from the `/photos` or `/photos/search` endpoints.
 
    ```bash
    curl "http://localhost:8080/files/<photo-id>.jpg" -H "Authorization: Bearer <jwt-token>" -o photo.jpg
