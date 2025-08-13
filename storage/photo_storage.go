@@ -40,7 +40,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	}
 	defer file.Close()
 
-	// temp file
+	// create temp file
 	tmpFile, err := os.CreateTemp("", "photo-*.tmp")
 	if err != nil {
 		s.Log.Error("failed to create temp file", zap.Error(err))
@@ -49,25 +49,19 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	tmpFilePath := tmpFile.Name()
 	defer os.Remove(tmpFilePath)
 
+	// copy uploaded file to temp file
 	if _, err := io.Copy(tmpFile, file); err != nil {
 		tmpFile.Close()
 		s.Log.Error("failed to copy file to temp", zap.Error(err), zap.String("temp_path", tmpFilePath))
 		return fmt.Errorf("failed to copy file to temp: %w", err)
 	}
 
-	// close the temp file
-	if err := tmpFile.Close(); err != nil {
-		s.Log.Error("failed to close temp file", zap.Error(err), zap.String("temp_path", tmpFilePath))
-		return fmt.Errorf("failed to close temp file: %w", err)
+	// seek to beginning for EXIF reading
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		tmpFile.Close()
+		s.Log.Error("failed to seek to start of temp file", zap.Error(err), zap.String("temp_path", tmpFilePath))
+		return fmt.Errorf("failed to seek to start of temp file: %w", err)
 	}
-
-	// open temp file for EXIF
-	tmpFile, err = os.Open(tmpFilePath)
-	if err != nil {
-		s.Log.Error("failed to reopen temp file for EXIF", zap.Error(err), zap.String("temp_path", tmpFilePath))
-		return fmt.Errorf("failed to reopen temp file for EXIF: %w", err)
-	}
-	defer tmpFile.Close()
 
 	// extract EXIF data
 	var geoPoint model.GeoPoint
@@ -75,6 +69,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	exifData, err := exif.Decode(tmpFile)
 	if err != nil {
 		s.Log.Warn("failed to decode EXIF data, using defaults", zap.Error(err))
+		takenAt = time.Now()
 	} else {
 		if lat, long, err := exifData.LatLong(); err == nil {
 			geoPoint = model.GeoPoint{
@@ -89,9 +84,13 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		}
 	}
 
-	tmpFile.Close()
+	// close temp file
+	if err := tmpFile.Close(); err != nil {
+		s.Log.Error("failed to close temp file", zap.Error(err), zap.String("temp_path", tmpFilePath))
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
 
-	// extract extension
+	// determine file extension
 	extension := filepath.Ext(fileHeader.Filename)
 	if extension == "" {
 		contentType := fileHeader.Header.Get("Content-Type")
@@ -105,20 +104,22 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		}
 	}
 
+	// generate file names and paths
 	id := primitive.NewObjectIDFromTimestamp(takenAt)
 	fileName := id.Hex() + extension
 	thumbName := id.Hex() + "_thumb" + extension
 	filePath := filepath.Join(s.Directory, fileName)
 	thumbPath := filepath.Join(s.Directory, thumbName)
 
+	// move temp file to final location
 	if err := os.Rename(tmpFilePath, filePath); err != nil {
 		s.Log.Error("failed to move temp file", zap.Error(err), zap.String("file_path", filePath))
 		return fmt.Errorf("failed to move temp file to %s: %w", filePath, err)
 	}
 
-	err = generateThumbnail(filePath, thumbPath)
-	if err != nil {
-		os.Remove(filePath) // clean up main file
+	// generate thumbnail
+	if err := generateThumbnail(filePath, thumbPath); err != nil {
+		os.Remove(filePath) // Clean up main file
 		s.Log.Error("failed to generate thumbnail", zap.Error(err), zap.String("thumb_path", thumbPath))
 		return fmt.Errorf("failed to generate thumbnail: %w", err)
 	}

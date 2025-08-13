@@ -123,6 +123,7 @@ func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
 	}
 }
 
+// GET
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := r.URL.Query().Get("id")
@@ -176,6 +177,7 @@ func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UPLOAD
 func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -215,6 +217,7 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
 }
 
+// SEARCH
 func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
