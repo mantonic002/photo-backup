@@ -1,21 +1,23 @@
 package api
 
 import (
-	"log"
 	"net/http"
-	"runtime/debug"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 )
 
-func recoveryMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func RecoveryMiddleware(logger *zap.Logger, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				msg := "Panic: %v, Stack trace: %s"
-				log.Printf(msg, err, string(debug.Stack()))
+				logger.Error("panic recovered",
+					zap.Any("error", err),
+					zap.String("method", r.Method),
+					zap.String("path", r.URL.Path),
+					zap.Time("timestamp", time.Now()),
+				)
 
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}

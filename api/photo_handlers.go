@@ -17,10 +17,6 @@ type PhotoHandlers struct {
 	Log       *zap.Logger
 }
 
-type LoginRequest struct {
-	Password string `json:"password"`
-}
-
 func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, logger *zap.Logger) *PhotoHandlers {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
@@ -34,40 +30,97 @@ func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, logger *
 	}
 }
 
-func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
-	mux.HandleFunc("/login", RequestLoggerMiddleware(h.Log, recoveryMiddleware(h.handleLogin)))
+// route with path, handler, methods, and middleware requirements
+type Route struct {
+	Path         string
+	Handler      http.HandlerFunc
+	Methods      []string
+	RequiresAuth bool
+}
 
-	mux.HandleFunc("/photos",
-		RequestLoggerMiddleware(h.Log, recoveryMiddleware(
-			h.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+// apply list of middleware to handler
+func chainMiddleware(handler http.HandlerFunc, middlewares ...func(http.HandlerFunc) http.HandlerFunc) http.HandlerFunc {
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		handler = middlewares[i](handler)
+	}
+	return handler
+}
+
+// set up a route with middleware and method validation.
+func (h *PhotoHandlers) registerRoute(mux *http.ServeMux, route Route) {
+	handler := route.Handler
+
+	// wrap handler with method validation
+	if len(route.Methods) > 0 {
+		originalHandler := handler
+		handler = func(w http.ResponseWriter, r *http.Request) {
+			for _, method := range route.Methods {
+				if r.Method == method {
+					originalHandler(w, r)
+					return
+				}
+			}
+			h.Log.Error("unsupported HTTP method",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path))
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+
+	// apply middlewares
+	middlewares := []func(http.HandlerFunc) http.HandlerFunc{
+		func(next http.HandlerFunc) http.HandlerFunc {
+			return RequestLoggerMiddleware(h.Log, next)
+		},
+		func(next http.HandlerFunc) http.HandlerFunc {
+			return RecoveryMiddleware(h.Log, next)
+		},
+	}
+	if route.RequiresAuth {
+		middlewares = append(middlewares, h.authMiddleware)
+	}
+
+	mux.HandleFunc(route.Path, chainMiddleware(handler, middlewares...))
+}
+
+func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
+	routes := []Route{
+		{
+			Path:    "/login",
+			Handler: h.handleLogin,
+			Methods: []string{http.MethodPost},
+		},
+		{
+			Path: "/photos",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method {
 				case http.MethodGet:
 					h.handleGetPhoto(w, r)
 				case http.MethodPost:
 					h.handleUploadPhoto(w, r)
-				default:
-					h.Log.Error("unsupported HTTP method", zap.String("method", r.Method), zap.String("path", r.URL.Path))
-					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				}
-			}))))
+			},
+			Methods:      []string{http.MethodGet, http.MethodPost},
+			RequiresAuth: true,
+		},
+		{
+			Path:         "/photos/search",
+			Handler:      h.handleSearchPhoto,
+			Methods:      []string{http.MethodGet},
+			RequiresAuth: true,
+		},
+		{
+			Path:         "/files/",
+			Handler:      http.StripPrefix("/files/", http.FileServer(http.Dir("./.Uploads"))).ServeHTTP,
+			Methods:      []string{http.MethodGet},
+			RequiresAuth: true,
+		},
+	}
 
-	mux.HandleFunc("/photos/search",
-		RequestLoggerMiddleware(h.Log, recoveryMiddleware(
-			h.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet {
-					h.handleSearchPhoto(w, r)
-				} else {
-					h.Log.Error("unsupported HTTP method", zap.String("method", r.Method), zap.String("path", r.URL.Path))
-					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-				}
-			}))))
-
-	mux.Handle("/files/",
-		RequestLoggerMiddleware(h.Log, recoveryMiddleware(
-			h.authMiddleware(
-				http.StripPrefix("/files/", http.FileServer(http.Dir("./.Uploads"))).ServeHTTP,
-			),
-		)))
+	// register all routes
+	for _, route := range routes {
+		h.registerRoute(mux, route)
+	}
 }
 
 func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
