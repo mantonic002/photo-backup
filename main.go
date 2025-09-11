@@ -70,6 +70,7 @@ func main() {
 	protected.HandleFunc("/photos", h.HandleGetPhoto).Queries("lastId", "{lastId}", "limit", "{limit}").Methods(http.MethodGet)
 	protected.HandleFunc("/photos/search", h.HandleSearchPhoto).Queries("long", "{long}", "lat", "{lat}", "dist", "{dist}").Methods(http.MethodGet)
 	protected.HandleFunc("/photos", h.HandleUploadPhoto).Methods(http.MethodPost)
+	protected.HandleFunc("/photos", h.HandleDeletePhoto).Queries("id", "{id}").Methods(http.MethodDelete)
 	protected.PathPrefix("/files/").Handler(http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
 
 	// MIDDLEWARE

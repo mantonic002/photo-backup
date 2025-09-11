@@ -106,6 +106,30 @@ func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
 }
 
+func (h *PhotoHandlers) HandleDeletePhoto(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		h.Log.Error("missing photo ID parameter", zap.String("path", r.URL.Path))
+		http.Error(w, "Missing photo ID parameter", http.StatusBadRequest)
+		return
+	}
+
+	err := h.Storage.DeletePhoto(ctx, id)
+	if err != nil {
+		h.Log.Error("failed to delete photo", zap.String("photo_id", id), zap.Error(err))
+		http.Error(w, "Failed to delete photo: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.Log.Info("photo deleted successfully", zap.String("photo_id", id))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Photo deleted successfully"})
+}
+
 // SEARCH
 func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

@@ -15,6 +15,7 @@ type PhotoDB interface {
 	Connect(ctx context.Context, logger *zap.Logger, connectionString, databaseName, collectionName string) error
 	Close(ctx context.Context) error
 	SavePhoto(ctx context.Context, photo model.PhotoDB) (*model.PhotoDB, error)
+	DeletePhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error)
 	SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error)
@@ -80,6 +81,25 @@ func (db *MongoPhotoDB) SavePhoto(ctx context.Context, photo model.PhotoDB) (*mo
 	}
 	photo.ID = oid
 	db.Log.Info("photo saved to MongoDB", zap.String("file_path", photo.FilePath), zap.String("photo_id", oid.Hex()))
+	return &photo, nil
+}
+
+func (db *MongoPhotoDB) DeletePhoto(ctx context.Context, id string) (*model.PhotoDB, error) {
+	var photo model.PhotoDB
+
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		db.Log.Error("invalid photo ID format", zap.Error(err), zap.String("id", id))
+		return nil, err
+	}
+
+	filter := bson.D{{Key: "_id", Value: oid}}
+	err = db.collection.FindOneAndDelete(ctx, filter).Decode(&photo)
+	if err != nil {
+		db.Log.Error("failed to delete photo from MongoDB", zap.Error(err), zap.String("photo_id", id))
+		return nil, err
+	}
+	db.Log.Info("photo deleted from MongoDB", zap.String("photo_id", id))
 	return &photo, nil
 }
 

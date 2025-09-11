@@ -19,6 +19,7 @@ import (
 
 type PhotoStorage interface {
 	SavePhoto(ctx context.Context, fileHeader *multipart.FileHeader) error
+	DeletePhoto(ctx context.Context, id string) error
 }
 
 type LocalPhotoStorage struct {
@@ -143,6 +144,27 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	}
 
 	s.Log.Info("photo saved successfully", zap.String("file_path", filePath), zap.String("photo_id", id.Hex()))
+	return nil
+}
+
+func (s LocalPhotoStorage) DeletePhoto(ctx context.Context, id string) error {
+	photo, err := s.Db.DeletePhoto(ctx, id)
+	if err != nil {
+		s.Log.Error("failed to delete photo from database", zap.Error(err), zap.String("photo_id", id))
+		return fmt.Errorf("failed to delete photo: %w", err)
+	}
+
+	// clean up files
+	if err := os.Remove(photo.FilePath); err != nil {
+		s.Log.Error("failed to remove photo file", zap.Error(err), zap.String("file_path", photo.FilePath))
+		return fmt.Errorf("failed to remove photo file: %w", err)
+	}
+	if err := os.Remove(photo.ThumbnailPath); err != nil {
+		s.Log.Error("failed to remove photo thumbnail", zap.Error(err), zap.String("thumb_path", photo.ThumbnailPath))
+		return fmt.Errorf("failed to remove photo thumbnail: %w", err)
+	}
+
+	s.Log.Info("photo deleted successfully", zap.String("photo_id", id))
 	return nil
 }
 
