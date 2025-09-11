@@ -9,6 +9,7 @@ import (
 	"photo-backup/storage"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,8 @@ func main() {
 	mongoURI := os.Getenv("MONGO_URI")
 	mongoDB := os.Getenv("MONGO_DB")
 	mongoCollection := os.Getenv("MONGO_COLLECTION")
+
+	secret := os.Getenv("JWT_SECRET")
 
 	// LOGGER
 	logger, err := zap.NewDevelopment()
@@ -56,13 +59,28 @@ func main() {
 	}
 
 	// HANDLERS
-	apiHandlers := api.NewPhotoHandlers(localStorage, mongodb, logger)
-	mux := http.NewServeMux()
-	apiHandlers.ServeHTTP(mux)
+	h := api.NewPhotoHandlers(localStorage, mongodb, secret, logger)
+	r := mux.NewRouter()
 
+	// PUBLIC ROUTES
+	r.HandleFunc("/login", h.HandleLogin).Methods(http.MethodPost)
+
+	// PROTECTED ROUTES
+	protected := r.NewRoute().Subrouter()
+	protected.HandleFunc("/photos", h.HandleGetPhoto).Queries("lastId", "{lastId}", "limit", "{limit}").Methods(http.MethodGet)
+	protected.HandleFunc("/photos/search", h.HandleSearchPhoto).Queries("long", "{long}", "lat", "{lat}", "dist", "{dist}").Methods(http.MethodGet)
+	protected.HandleFunc("/photos", h.HandleUploadPhoto).Methods(http.MethodPost)
+	protected.PathPrefix("/files/").Handler(http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
+
+	// MIDDLEWARE
+	protected.Use(api.AuthMiddleware(secret, logger))
+	r.Use(api.RecoveryMiddleware(logger))
+	r.Use(api.RequestLoggerMiddleware(logger))
+
+	// START SERVER
 	logger.Info("Starting server on :8080")
 
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal(err)
 	}
 }

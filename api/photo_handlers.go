@@ -3,10 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"photo-backup/storage"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 )
 
@@ -17,11 +17,7 @@ type PhotoHandlers struct {
 	Log       *zap.Logger
 }
 
-func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, logger *zap.Logger) *PhotoHandlers {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		logger.Fatal("JWT_SECRET is empty")
-	}
+func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, secret string, logger *zap.Logger) *PhotoHandlers {
 	return &PhotoHandlers{
 		Storage:   storage,
 		Db:        db,
@@ -30,155 +26,48 @@ func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, logger *
 	}
 }
 
-// route with path, handler, methods, and middleware requirements
-type Route struct {
-	Path         string
-	Handler      http.HandlerFunc
-	Methods      []string
-	RequiresAuth bool
-}
-
-// apply list of middleware to handler
-func chainMiddleware(handler http.HandlerFunc, middlewares ...func(http.HandlerFunc) http.HandlerFunc) http.HandlerFunc {
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
-	}
-	return handler
-}
-
-// set up a route with middleware and method validation.
-func (h *PhotoHandlers) registerRoute(mux *http.ServeMux, route Route) {
-	handler := route.Handler
-
-	// wrap handler with method validation
-	if len(route.Methods) > 0 {
-		originalHandler := handler
-		handler = func(w http.ResponseWriter, r *http.Request) {
-			for _, method := range route.Methods {
-				if r.Method == method {
-					originalHandler(w, r)
-					return
-				}
-			}
-			h.Log.Error("unsupported HTTP method",
-				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path))
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}
-
-	// apply middlewares
-	middlewares := []func(http.HandlerFunc) http.HandlerFunc{
-		func(next http.HandlerFunc) http.HandlerFunc {
-			return RequestLoggerMiddleware(h.Log, next)
-		},
-		func(next http.HandlerFunc) http.HandlerFunc {
-			return RecoveryMiddleware(h.Log, next)
-		},
-	}
-	if route.RequiresAuth {
-		middlewares = append(middlewares, h.authMiddleware)
-	}
-
-	mux.HandleFunc(route.Path, chainMiddleware(handler, middlewares...))
-}
-
-func (h *PhotoHandlers) ServeHTTP(mux *http.ServeMux) {
-	routes := []Route{
-		{
-			Path:    "/login",
-			Handler: h.handleLogin,
-			Methods: []string{http.MethodPost},
-		},
-		{
-			Path: "/photos",
-			Handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					h.handleGetPhoto(w, r)
-				case http.MethodPost:
-					h.handleUploadPhoto(w, r)
-				}
-			},
-			Methods:      []string{http.MethodGet, http.MethodPost},
-			RequiresAuth: true,
-		},
-		{
-			Path:         "/photos/search",
-			Handler:      h.handleSearchPhoto,
-			Methods:      []string{http.MethodGet},
-			RequiresAuth: true,
-		},
-		{
-			Path:         "/files/",
-			Handler:      http.StripPrefix("/files/", http.FileServer(http.Dir("./.Uploads"))).ServeHTTP,
-			Methods:      []string{http.MethodGet},
-			RequiresAuth: true,
-		},
-	}
-
-	// register all routes
-	for _, route := range routes {
-		h.registerRoute(mux, route)
-	}
-}
-
 // GET
-func (h *PhotoHandlers) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
+func (h *PhotoHandlers) HandleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := r.URL.Query().Get("id")
-	lastId := r.URL.Query().Get("lastId")
-	limitStr := r.URL.Query().Get("limit")
+	vars := mux.Vars(r)
 
-	if id == "" && limitStr == "" {
+	lastId := vars["lastId"]
+	limitStr := vars["limit"]
+
+	if limitStr == "" {
 		h.Log.Error("missing necessary parameters", zap.String("path", r.URL.Path))
 		http.Error(w, "Missing necessary parameters", http.StatusBadRequest)
 		return
 	}
 
-	if id != "" { // single photo, return full size photo
-		photo, err := h.Db.GetPhoto(ctx, id)
-		if err != nil {
-			h.Log.Info("photo not found", zap.String("photo_id", id), zap.Error(err))
-			http.Error(w, "Photo not found: "+err.Error(), http.StatusNotFound)
-			return
-		}
-
-		h.Log.Info("retrieved photo", zap.String("photo_id", id), zap.String("file_path", photo.FilePath))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(photo)
-
-	} else if limitStr != "" { // multiple photos, return thumbnails
-		limit, err := strconv.Atoi(limitStr)
-		if err != nil {
-			h.Log.Error("invalid limit value", zap.String("limit", limitStr), zap.Error(err))
-			http.Error(w, "Invalid limit value", http.StatusBadRequest)
-			return
-		}
-
-		photos, err := h.Db.GetPhotos(ctx, lastId, int64(limit))
-		if err != nil {
-			h.Log.Info("failed to fetch photos", zap.String("last_id", lastId), zap.Int64("limit", int64(limit)), zap.Error(err))
-			http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if len(photos) == 0 {
-			h.Log.Warn("no photos found", zap.String("last_id", lastId), zap.Int64("limit", int64(limit)))
-			http.Error(w, "No photos found", http.StatusNotFound)
-			return
-		}
-
-		h.Log.Info("retrieved photos", zap.Int("count", len(photos)), zap.String("last_id", lastId), zap.Int64("limit", int64(limit)))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(photos)
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		h.Log.Error("invalid limit value", zap.String("limit", limitStr), zap.Error(err))
+		http.Error(w, "Invalid limit value", http.StatusBadRequest)
+		return
 	}
+
+	photos, err := h.Db.GetPhotos(ctx, lastId, int64(limit))
+	if err != nil {
+		h.Log.Info("failed to fetch photos", zap.String("last_id", lastId), zap.Int64("limit", int64(limit)), zap.Error(err))
+		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(photos) == 0 {
+		h.Log.Warn("no photos found", zap.String("last_id", lastId), zap.Int64("limit", int64(limit)))
+		http.Error(w, "No photos found", http.StatusNotFound)
+		return
+	}
+
+	h.Log.Info("retrieved photos", zap.Int("count", len(photos)), zap.String("last_id", lastId), zap.Int64("limit", int64(limit)))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(photos)
 }
 
 // UPLOAD
-func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
+func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	const maxSize = 200 * 1024 * 1024 // 200 MB
@@ -218,12 +107,13 @@ func (h *PhotoHandlers) handleUploadPhoto(w http.ResponseWriter, r *http.Request
 }
 
 // SEARCH
-func (h *PhotoHandlers) handleSearchPhoto(w http.ResponseWriter, r *http.Request) {
+func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	longStr := r.URL.Query().Get("long")
-	latStr := r.URL.Query().Get("lat")
-	distStr := r.URL.Query().Get("dist")
+	vars := mux.Vars(r)
+	longStr := vars["long"]
+	latStr := vars["lat"]
+	distStr := vars["dist"]
 	if longStr == "" || latStr == "" || distStr == "" {
 		h.Log.Error("missing search parameters", zap.String("long", longStr), zap.String("lat", latStr), zap.String("dist", distStr))
 		http.Error(w, "Missing parameter", http.StatusBadRequest)

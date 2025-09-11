@@ -20,7 +20,7 @@ func CheckPasswordHash(password, hash string) bool {
 	return err == nil
 }
 
-func (h *PhotoHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *PhotoHandlers) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.Log.Error("unsupported HTTP method for login", zap.String("method", r.Method))
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
