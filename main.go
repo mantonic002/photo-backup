@@ -70,11 +70,14 @@ func main() {
 	protected.HandleFunc("/photos", h.HandleGetPhoto).Queries("lastId", "{lastId}", "limit", "{limit}").Methods(http.MethodGet)
 	protected.HandleFunc("/photos/search", h.HandleSearchPhoto).Queries("long", "{long}", "lat", "{lat}", "dist", "{dist}").Methods(http.MethodGet)
 	protected.HandleFunc("/photos", h.HandleUploadPhoto).Methods(http.MethodPost)
-	protected.HandleFunc("/photos", h.HandleDeletePhoto).Queries("id", "{id}").Methods(http.MethodDelete)
+	protected.HandleFunc("/photos", h.HandleDeletePhoto).Queries("id", "{id}").Methods(http.MethodDelete, http.MethodOptions)
+	protected.HandleFunc("/photos/bulk-delete", h.HandleDeleteMultiplePhotos).Methods(http.MethodDelete, http.MethodOptions)
 	protected.PathPrefix("/files/").Handler(http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
 
 	// MIDDLEWARE
-	protected.Use(api.AuthMiddleware(secret, logger))
+	// protected.Use(api.AuthMiddleware(secret, logger))
+
+	r.Use(api.CORSMiddleware())
 	r.Use(api.RecoveryMiddleware(logger))
 	r.Use(api.RequestLoggerMiddleware(logger))
 

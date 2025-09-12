@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"photo-backup/storage"
 	"strconv"
@@ -106,21 +108,16 @@ func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
 }
 
+// DELETE SINGLE
 func (h *PhotoHandlers) HandleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
 	id := vars["id"]
-	if id == "" {
-		h.Log.Error("missing photo ID parameter", zap.String("path", r.URL.Path))
-		http.Error(w, "Missing photo ID parameter", http.StatusBadRequest)
-		return
-	}
-
-	err := h.Storage.DeletePhoto(ctx, id)
+	
+	err := h.deletePhoto(ctx, id)
 	if err != nil {
 		h.Log.Error("failed to delete photo", zap.String("photo_id", id), zap.Error(err))
-		http.Error(w, "Failed to delete photo: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -128,6 +125,56 @@ func (h *PhotoHandlers) HandleDeletePhoto(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Photo deleted successfully"})
+}
+
+// DELETE MULTIPLE
+func (h *PhotoHandlers) HandleDeleteMultiplePhotos(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+
+    var req struct {
+        IDs []string `json:"ids"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        h.Log.Error("failed to decode delete multiple request", zap.Error(err))
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+    if len(req.IDs) == 0 {
+        h.Log.Error("no photo IDs provided for bulk delete")
+        http.Error(w, "No photo IDs provided", http.StatusBadRequest)
+        return
+    }
+
+    var failed []string
+    for _, id := range req.IDs {
+        if err := h.deletePhoto(ctx, id); err != nil {
+            failed = append(failed, id)
+            h.Log.Error("failed to delete photo in bulk", zap.String("photo_id", id), zap.Error(err))
+        }
+    }
+
+    if len(failed) > 0 {
+        http.Error(w, "Failed to delete some photos: "+fmt.Sprint(failed), http.StatusInternalServerError)
+        return
+    }
+
+    h.Log.Info("deleted multiple photos", zap.Int("count", len(req.IDs)))
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"message": "Photos deleted successfully"})
+}
+
+func (h *PhotoHandlers) deletePhoto(ctx context.Context, id string) error {
+	if id == "" {
+		h.Log.Error("missing photo ID parameter")
+		return fmt.Errorf("missing photo ID parameter")
+	}
+
+	err := h.Storage.DeletePhoto(ctx, id)
+	if err != nil {
+		h.Log.Error("failed to delete photo", zap.String("photo_id", id), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // SEARCH
