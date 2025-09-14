@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
+	"sync"
+
 	"net/http"
 	"photo-backup/storage"
 	"strconv"
@@ -70,42 +73,70 @@ func (h *PhotoHandlers) HandleGetPhoto(w http.ResponseWriter, r *http.Request) {
 
 // UPLOAD
 func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+    const maxSize = 200 * 1024 * 1024 // 200 MB
 
-	const maxSize = 200 * 1024 * 1024 // 200 MB
+    if r.ContentLength > maxSize {
+        h.Log.Error("file size exceeds limit", zap.Int64("content_length", r.ContentLength), zap.Int64("max_size", maxSize))
+        http.Error(w, "File size exceeds limit", http.StatusRequestEntityTooLarge)
+        return
+    }
 
-	if r.ContentLength > maxSize {
-		h.Log.Error("file size exceeds limit", zap.Int64("content_length", r.ContentLength), zap.Int64("max_size", maxSize))
-		http.Error(w, "File size exceeds limit", http.StatusRequestEntityTooLarge)
-		return
+    err := r.ParseMultipartForm(maxSize)
+    if err != nil {
+        h.Log.Error("failed to parse multipart form", zap.Error(err))
+        http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    fileHeaders := r.MultipartForm.File["file"]
+    if len(fileHeaders) == 0 {
+        h.Log.Error("no file found in request", zap.String("path", r.URL.Path))
+        http.Error(w, "No file found in the request", http.StatusBadRequest)
+        return
+    }
+
+    // waitgroup for all uploads to finish
+    var wg sync.WaitGroup
+	// chan for errors and successes
+    errors := make(chan error, len(fileHeaders))
+	successes := make(chan string, len(fileHeaders))
+    ctx := r.Context()
+
+    for _, fileHeader := range fileHeaders {
+        wg.Add(1)
+        go func(fileHeader *multipart.FileHeader) {
+            defer wg.Done()
+            if err := h.Storage.SavePhoto(ctx, fileHeader); err != nil {
+                h.Log.Error("failed to save photo", zap.String("filename", fileHeader.Filename), zap.Error(err))
+                errors <- err
+                return
+            }
+			successes <- fileHeader.Filename
+            h.Log.Info("photo uploaded successfully", zap.String("filename", fileHeader.Filename))
+        }(fileHeader)
+    }
+
+    wg.Wait()
+    close(errors)
+    close(successes)
+
+	// Collect errors and successes
+    var errorList []error
+    for err := range errors {
+        errorList = append(errorList, err)
+    }
+	var successList []string
+	for fname := range successes {
+		successList = append(successList, fname)
 	}
 
-	err := r.ParseMultipartForm(maxSize)
-	if err != nil {
-		h.Log.Error("failed to parse multipart form", zap.Error(err))
-		http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
+    if len(errorList) > 0 {
+        h.Log.Error("some photo uploads failed", zap.Int("error_count", len(errorList)))
+    }
 
-	fileHeaders := r.MultipartForm.File["file"]
-	if len(fileHeaders) == 0 {
-		h.Log.Error("no file found in request", zap.String("path", r.URL.Path))
-		http.Error(w, "No file found in the request", http.StatusBadRequest)
-		return
-	}
-
-	for _, fileHeader := range fileHeaders {
-		if err := h.Storage.SavePhoto(ctx, fileHeader); err != nil {
-			h.Log.Error("failed to save photo", zap.String("filename", fileHeader.Filename), zap.Error(err))
-			http.Error(w, "Failed to save photo: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.Log.Info("photo uploaded successfully", zap.String("filename", fileHeader.Filename))
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "File uploaded successfully"})
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(map[string]string{"message": "File/s uploaded successfully", "files": fmt.Sprint(successList), "errors": fmt.Sprint(errorList), "count": fmt.Sprint(len(successList))})
 }
 
 // DELETE SINGLE
