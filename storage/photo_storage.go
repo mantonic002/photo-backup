@@ -65,7 +65,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 	}
 
 	// extract EXIF data
-	var geoPoint model.GeoPoint
+	var lonLat *model.GeoPoint
 	var takenAt time.Time
 	exifData, err := exif.Decode(tmpFile)
 	if err != nil {
@@ -73,7 +73,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		takenAt = time.Now()
 	} else {
 		if lat, long, err := exifData.LatLong(); err == nil {
-			geoPoint = model.GeoPoint{
+			lonLat = &model.GeoPoint{
 				Type:        "Point",
 				Coordinates: []float64{long, lat},
 			}
@@ -125,7 +125,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		return fmt.Errorf("failed to generate thumbnail: %w", err)
 	}
 
-	// save to mongo
+	// save to MongoDB
 	photo := model.PhotoDB{
 		ID:            id,
 		Size:          fileHeader.Size,
@@ -133,7 +133,7 @@ func (s *LocalPhotoStorage) SavePhoto(ctx context.Context, fileHeader *multipart
 		FilePath:      filePath,
 		ThumbnailPath: thumbPath,
 		TakenAt:       takenAt,
-		LonLat:        geoPoint,
+		LonLat:        lonLat,
 	}
 	if _, err := s.Db.SavePhoto(ctx, photo); err != nil {
 		// clean up files if database save fails

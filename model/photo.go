@@ -8,7 +8,7 @@ import (
 
 type PhotoDB struct {
 	ID            primitive.ObjectID `bson:"_id,omitempty"`
-	LonLat        GeoPoint           `bson:"lonlat,omitempty"`
+	LonLat        *GeoPoint           `bson:"lonlat,omitempty"`
 	TakenAt       time.Time          `bson:"taken_at,omitempty"`
 	FilePath      string             `bson:"file_path"`
 	ThumbnailPath string             `bson:"thumbnail_path,omitempty"`
@@ -18,6 +18,6 @@ type PhotoDB struct {
 }
 
 type GeoPoint struct {
-	Type        string    `bson:"type"`
-	Coordinates []float64 `bson:"coordinates"` // [longitude, latitude]
+	Type        string    `bson:"type,omitempty"`
+	Coordinates []float64 `bson:"coordinates,omitempty"` // [longitude, latitude]
 }

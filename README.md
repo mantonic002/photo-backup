@@ -79,7 +79,7 @@ Run the following MongoDB commands to create the indexes:
 ```javascript
 use photo_backup
 db.photos.createIndex({ "taken_at": -1 })
-db.photos.createIndex({ "lonlat": "2dsphere" })
+db.photos.createIndex({ "lonlat": "2dsphere" }, { sparse: true })
 ```
 
 ### 4. Install Dependencies

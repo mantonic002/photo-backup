@@ -120,6 +120,7 @@ func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request
     close(errors)
     close(successes)
 
+
 	// Collect errors and successes
     var errorList []error
     for err := range errors {
@@ -130,13 +131,18 @@ func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request
 		successList = append(successList, fname)
 	}
 
+	var message = ""
     if len(errorList) > 0 {
         h.Log.Error("some photo uploads failed", zap.Int("error_count", len(errorList)))
+		message += "Some uploads failed"
     }
+	if len(successList) > 0 {
+		message += "Uploads completed successfully"
+	}
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{"message": "File/s uploaded successfully", "files": fmt.Sprint(successList), "errors": fmt.Sprint(errorList), "count": fmt.Sprint(len(successList))})
+    json.NewEncoder(w).Encode(map[string]string{"message": message, "files": fmt.Sprint(successList), "errors": fmt.Sprint(errorList), "count": fmt.Sprint(len(successList))})
 }
 
 // DELETE SINGLE
