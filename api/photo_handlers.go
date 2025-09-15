@@ -74,6 +74,7 @@ func (h *PhotoHandlers) HandleGetPhoto(w http.ResponseWriter, r *http.Request) {
 // UPLOAD
 func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request) {
     const maxSize = 200 * 1024 * 1024 // 200 MB
+    const maxConcurrentUploads = 10
 
     if r.ContentLength > maxSize {
         h.Log.Error("file size exceeds limit", zap.Int64("content_length", r.ContentLength), zap.Int64("max_size", maxSize))
@@ -95,54 +96,68 @@ func (h *PhotoHandlers) HandleUploadPhoto(w http.ResponseWriter, r *http.Request
         return
     }
 
-    // waitgroup for all uploads to finish
+    type uploadResult struct {
+        Filename string
+        Error    error
+    }
+
     var wg sync.WaitGroup
-	// chan for errors and successes
-    errors := make(chan error, len(fileHeaders))
-	successes := make(chan string, len(fileHeaders))
+    results := make(chan uploadResult, len(fileHeaders))
+    sem := make(chan struct{}, maxConcurrentUploads)
     ctx := r.Context()
 
     for _, fileHeader := range fileHeaders {
+        sem <- struct{}{} // Acquire semaphore
         wg.Add(1)
         go func(fileHeader *multipart.FileHeader) {
             defer wg.Done()
-            if err := h.Storage.SavePhoto(ctx, fileHeader); err != nil {
-                h.Log.Error("failed to save photo", zap.String("filename", fileHeader.Filename), zap.Error(err))
-                errors <- err
+            defer func() { <-sem }() // Release semaphore
+
+            select {
+            case <-ctx.Done():
+                h.Log.Warn("upload canceled", zap.String("filename", fileHeader.Filename), zap.Error(ctx.Err()))
+                results <- uploadResult{Filename: fileHeader.Filename, Error: ctx.Err()}
                 return
+            default:
+                if err := h.Storage.SavePhoto(ctx, fileHeader); err != nil {
+                    h.Log.Error("failed to save photo", zap.String("filename", fileHeader.Filename), zap.Error(err))
+                    results <- uploadResult{Filename: fileHeader.Filename, Error: err}
+                    return
+                }
+                h.Log.Info("photo uploaded successfully", zap.String("filename", fileHeader.Filename))
+                results <- uploadResult{Filename: fileHeader.Filename}
             }
-			successes <- fileHeader.Filename
-            h.Log.Info("photo uploaded successfully", zap.String("filename", fileHeader.Filename))
         }(fileHeader)
     }
 
     wg.Wait()
-    close(errors)
-    close(successes)
+    close(results)
 
-
-	// Collect errors and successes
-    var errorList []error
-    for err := range errors {
-        errorList = append(errorList, err)
+    var successList, failedList []string
+    for result := range results {
+        if result.Error != nil {
+            failedList = append(failedList, result.Filename)
+            continue
+        }
+        successList = append(successList, result.Filename)
     }
-	var successList []string
-	for fname := range successes {
-		successList = append(successList, fname)
-	}
 
-	var message = ""
-    if len(errorList) > 0 {
-        h.Log.Error("some photo uploads failed", zap.Int("error_count", len(errorList)))
-		message += "Some uploads failed"
+    response := map[string]interface{}{
+        "message":    "Photo upload completed",
+        "successful": successList,
+        "failed":     failedList,
+        "count":      len(successList),
     }
-	if len(successList) > 0 {
-		message += "Uploads completed successfully"
-	}
 
     w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{"message": message, "files": fmt.Sprint(successList), "errors": fmt.Sprint(errorList), "count": fmt.Sprint(len(successList))})
+    if len(failedList) > 0 && len(successList) > 0 {
+        w.WriteHeader(http.StatusMultiStatus)
+    } else if len(failedList) > 0 {
+        w.WriteHeader(http.StatusInternalServerError)
+    } else {
+        w.WriteHeader(http.StatusOK)
+    }
+    json.NewEncoder(w).Encode(response)
 }
 
 // DELETE SINGLE
