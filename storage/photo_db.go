@@ -133,10 +133,10 @@ func (db *MongoPhotoDB) GetPhotos(ctx context.Context, lastIdString string, limi
 			db.Log.Info("invalid last ID format", zap.Error(err), zap.String("last_id", lastIdString))
 			return nil, err
 		}
-		filter = bson.M{"_id": bson.M{"$gt": lastId}}
+		filter = bson.M{"_id": bson.M{"$lt": lastId}}
 	}
 
-	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": 1})
+	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": -1})
 	output, err := db.collection.Find(ctx, filter, opts)
 	if err != nil {
 		db.Log.Error("failed to query photos from MongoDB", zap.Error(err), zap.Int64("limit", limit))
