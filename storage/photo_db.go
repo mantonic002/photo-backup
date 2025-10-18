@@ -18,7 +18,7 @@ type PhotoDB interface {
 	DeletePhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error)
-	SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error)
+	SearchPhotosByLocation(ctx context.Context, lastIdString string, limit int64, long float64, lat float64, dist int) ([]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
@@ -151,7 +151,7 @@ func (db *MongoPhotoDB) GetPhotos(ctx context.Context, lastIdString string, limi
 	return photos, nil
 }
 
-func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context, long float64, lat float64, dist int) ([]model.PhotoDB, error) {
+func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context,  lastIdString string, limit int64, long float64, lat float64, dist int) ([]model.PhotoDB, error) {
 	var photos []model.PhotoDB
 
 	var geoPoint = model.GeoPoint{
@@ -159,16 +159,26 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context, long float64
 		Coordinates: []float64{long, lat},
 	}
 
-	filter := bson.D{
-		{Key: "lonlat", Value: bson.D{
-			{Key: "$near", Value: bson.D{
-				{Key: "$geometry", Value: geoPoint},
-				{Key: "$maxDistance", Value: dist},
-			}},
-		}},
+	filter := bson.M{
+		"lonlat": bson.M{
+			"$near": bson.M{
+				"$geometry":    geoPoint,
+				"$maxDistance": dist,
+			},
+		},
 	}
 
-	output, err := db.collection.Find(ctx, filter)
+	if lastIdString != "" {
+		lastId, err := primitive.ObjectIDFromHex(lastIdString)
+		if err != nil {
+			db.Log.Info("invalid last ID format", zap.Error(err), zap.String("last_id", lastIdString))
+			return nil, err
+		}
+		filter["_id"] = bson.M{"$lt": lastId}
+	}
+
+	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": -1})
+	output, err := db.collection.Find(ctx, filter, opts)
 	if err != nil {
 		db.Log.Error("failed to search photos by location", zap.Error(err), zap.Float64("longitude", long), zap.Float64("latitude", lat), zap.Int("distance", dist))
 		return nil, err

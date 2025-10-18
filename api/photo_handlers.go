@@ -232,11 +232,27 @@ func (h *PhotoHandlers) deletePhoto(ctx context.Context, id string) error {
 // SEARCH
 func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
 	vars := mux.Vars(r)
+
+	lastId := vars["lastId"]
+	limitStr := vars["limit"]
 	longStr := vars["long"]
 	latStr := vars["lat"]
 	distStr := vars["dist"]
+
+	if limitStr == "" {
+		h.Log.Error("missing necessary parameters", zap.String("path", r.URL.Path))
+		http.Error(w, "Missing necessary parameters", http.StatusBadRequest)
+		return
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		h.Log.Error("invalid limit value", zap.String("limit", limitStr), zap.Error(err))
+		http.Error(w, "Invalid limit value", http.StatusBadRequest)
+		return
+	}
+
 	if longStr == "" || latStr == "" || distStr == "" {
 		h.Log.Error("missing search parameters", zap.String("long", longStr), zap.String("lat", latStr), zap.String("dist", distStr))
 		http.Error(w, "Missing parameter", http.StatusBadRequest)
@@ -262,7 +278,7 @@ func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	photos, err := h.Db.SearchPhotosByLocation(ctx, long, lat, dist)
+	photos, err := h.Db.SearchPhotosByLocation(ctx, lastId, int64(limit), long, lat, dist)
 	if err != nil {
 		h.Log.Error("failed to search photos by location", zap.Error(err))
 		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)
