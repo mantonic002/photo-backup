@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -22,8 +23,6 @@ func main() {
 	mongoURI := os.Getenv("MONGO_URI")
 	mongoDB := os.Getenv("MONGO_DB")
 	mongoCollection := os.Getenv("MONGO_COLLECTION")
-
-	secret := os.Getenv("JWT_SECRET")
 
 	// LOGGER
 	logger, err := zap.NewDevelopment()
@@ -58,24 +57,31 @@ func main() {
 		Log:       logger,
 	}
 
+	// COOKIE STORE
+	api.Store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")))
+
 	// HANDLERS
-	h := api.NewPhotoHandlers(localStorage, mongodb, secret, logger)
+	h := api.NewPhotoHandlers(localStorage, mongodb, logger)
 	r := mux.NewRouter()
 
 	// PUBLIC ROUTES
-	r.HandleFunc("/login", h.HandleLogin).Methods(http.MethodPost)
+	r.HandleFunc("/login", h.HandleLogin).Methods(http.MethodPost, http.MethodOptions)
 
 	// PROTECTED ROUTES
 	protected := r.NewRoute().Subrouter()
-	protected.HandleFunc("/photos", h.HandleGetPhoto).Queries("lastId", "{lastId}", "limit", "{limit}").Methods(http.MethodGet)
-	protected.HandleFunc("/photos/search", h.HandleSearchPhoto).Queries("lastId", "{lastId}", "limit", "{limit}", "latMin", "{latMin}", "latMax", "{latMax}", "longMin", "{longMin}", "longMax", "{longMax}").Methods(http.MethodGet)
+	protected.HandleFunc("/photos", h.HandleGetPhoto).Queries("lastId", "{lastId}", "limit", "{limit}").Methods(http.MethodGet, http.MethodOptions)
+	protected.HandleFunc("/photos/search", h.HandleSearchPhoto).
+		Queries("lastId", "{lastId}", "limit", "{limit}",
+		"latMin", "{latMin}", "latMax", "{latMax}",
+		"longMin", "{longMin}", "longMax", "{longMax}").
+		Methods(http.MethodGet, http.MethodOptions)
 	protected.HandleFunc("/photos", h.HandleUploadPhoto).Methods(http.MethodPost)
 	protected.HandleFunc("/photos", h.HandleDeletePhoto).Queries("id", "{id}").Methods(http.MethodDelete, http.MethodOptions)
 	protected.HandleFunc("/photos/bulk-delete", h.HandleDeleteMultiplePhotos).Methods(http.MethodDelete, http.MethodOptions)
 	protected.PathPrefix("/files/").Handler(http.StripPrefix("/files/", http.FileServer(http.Dir("./.uploads"))))
 
 	// MIDDLEWARE
-	// protected.Use(api.AuthMiddleware(secret, logger))
+	protected.Use(api.AuthMiddleware(logger))
 
 	r.Use(api.CORSMiddleware())
 	r.Use(api.RecoveryMiddleware(logger))

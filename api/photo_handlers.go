@@ -18,15 +18,13 @@ import (
 type PhotoHandlers struct {
 	Storage   storage.PhotoStorage
 	Db        storage.PhotoDB
-	SecretKey string
 	Log       *zap.Logger
 }
 
-func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, secret string, logger *zap.Logger) *PhotoHandlers {
+func NewPhotoHandlers(storage storage.PhotoStorage, db storage.PhotoDB, logger *zap.Logger) *PhotoHandlers {
 	return &PhotoHandlers{
 		Storage:   storage,
 		Db:        db,
-		SecretKey: secret,
 		Log:       logger,
 	}
 }
