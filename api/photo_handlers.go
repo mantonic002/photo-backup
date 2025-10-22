@@ -236,9 +236,10 @@ func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request
 
 	lastId := vars["lastId"]
 	limitStr := vars["limit"]
-	longStr := vars["long"]
-	latStr := vars["lat"]
-	distStr := vars["dist"]
+	latMin := vars["latMin"]
+	latMax := vars["latMax"]
+	longMin := vars["longMin"]
+	longMax := vars["longMax"]
 
 	if limitStr == "" {
 		h.Log.Error("missing necessary parameters", zap.String("path", r.URL.Path))
@@ -253,32 +254,41 @@ func (h *PhotoHandlers) HandleSearchPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if longStr == "" || latStr == "" || distStr == "" {
-		h.Log.Error("missing search parameters", zap.String("long", longStr), zap.String("lat", latStr), zap.String("dist", distStr))
+	if longMin == "" || latMin == "" || longMax == "" || latMax == "" {
+		h.Log.Error("missing search parameters", zap.String("latMin", latMin), zap.String("latMax", latMax), zap.String("longMin", longMin), zap.String("longMax", longMax))
 		http.Error(w, "Missing parameter", http.StatusBadRequest)
 		return
 	}
 
-	long, err := strconv.ParseFloat(longStr, 64)
+	latMinf, err := strconv.ParseFloat(latMin, 64)
 	if err != nil {
-		h.Log.Info("invalid longitude value", zap.String("long", longStr), zap.Error(err))
-		http.Error(w, "Invalid longitude value", http.StatusBadRequest)
-		return
-	}
-	lat, err := strconv.ParseFloat(latStr, 64)
-	if err != nil {
-		h.Log.Info("invalid latitude value", zap.String("lat", latStr), zap.Error(err))
+		h.Log.Info("invalid latitude value", zap.String("lat", latMin), zap.Error(err))
 		http.Error(w, "Invalid latitude value", http.StatusBadRequest)
 		return
 	}
-	dist, err := strconv.Atoi(distStr)
+
+	latMaxf, err := strconv.ParseFloat(latMax, 64)
 	if err != nil {
-		h.Log.Info("invalid distance value", zap.String("dist", distStr), zap.Error(err))
-		http.Error(w, "Invalid distance value", http.StatusBadRequest)
+		h.Log.Info("invalid latitude value", zap.String("lat", latMax), zap.Error(err))
+		http.Error(w, "Invalid latitude value", http.StatusBadRequest)
 		return
 	}
 
-	photos, err := h.Db.SearchPhotosByLocation(ctx, lastId, int64(limit), long, lat, dist)
+	longMinf, err := strconv.ParseFloat(longMin, 64)
+	if err != nil {
+		h.Log.Info("invalid longitude value", zap.String("long", longMin), zap.Error(err))
+		http.Error(w, "Invalid longitude value", http.StatusBadRequest)
+		return
+	}
+
+	longMaxf, err := strconv.ParseFloat(longMax, 64)
+	if err != nil {
+		h.Log.Info("invalid longitude value", zap.String("long", longMax), zap.Error(err))
+		http.Error(w, "Invalid longitude value", http.StatusBadRequest)
+		return
+	}
+
+	photos, err := h.Db.SearchPhotosByLocation(ctx, lastId, int64(limit), latMinf, latMaxf, longMinf, longMaxf)
 	if err != nil {
 		h.Log.Error("failed to search photos by location", zap.Error(err))
 		http.Error(w, "Failed to fetch photos: "+err.Error(), http.StatusInternalServerError)

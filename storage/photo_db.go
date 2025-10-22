@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"math"
 	"photo-backup/model"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,7 +19,7 @@ type PhotoDB interface {
 	DeletePhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhoto(ctx context.Context, id string) (*model.PhotoDB, error)
 	GetPhotos(ctx context.Context, lastIdString string, limit int64) ([]model.PhotoDB, error)
-	SearchPhotosByLocation(ctx context.Context, lastIdString string, limit int64, long float64, lat float64, dist int) ([]model.PhotoDB, error)
+	SearchPhotosByLocation(ctx context.Context,  lastIdString string, limit int64, latMin float64, latMax float64,  longMin float64, longMax float64) ([]model.PhotoDB, error)
 }
 
 type MongoPhotoDB struct {
@@ -151,22 +152,33 @@ func (db *MongoPhotoDB) GetPhotos(ctx context.Context, lastIdString string, limi
 	return photos, nil
 }
 
-func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context,  lastIdString string, limit int64, long float64, lat float64, dist int) ([]model.PhotoDB, error) {
+func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context,  lastIdString string, limit int64, latMin float64, latMax float64,  longMin float64, longMax float64) ([]model.PhotoDB, error) {
 	var photos []model.PhotoDB
 
-	var geoPoint = model.GeoPoint{
-		Type:        "Point",
-		Coordinates: []float64{long, lat},
-	}
+	// Ensure proper order of coordinates
+    minLong := math.Min(longMin, longMax)
+    maxLong := math.Max(longMin, longMax)
+    minLat := math.Min(latMin, latMax)
+    maxLat := math.Max(latMin, latMax)
 
-	filter := bson.M{
-		"lonlat": bson.M{
-			"$near": bson.M{
-				"$geometry":    geoPoint,
-				"$maxDistance": dist,
-			},
-		},
-	}
+    polygon := bson.A{
+        bson.A{minLong, minLat}, // bottom-left
+        bson.A{minLong, maxLat}, // top-left
+        bson.A{maxLong, maxLat}, // top-right
+        bson.A{maxLong, minLat}, // bottom-right
+        bson.A{minLong, minLat}, // close the polygon
+    }
+
+    filter := bson.M{
+        "lonlat": bson.M{
+            "$geoWithin": bson.M{
+                "$geometry": bson.M{
+                    "type":        "Polygon",
+                    "coordinates": bson.A{polygon},
+                },
+            },
+        },
+    }
 
 	if lastIdString != "" {
 		lastId, err := primitive.ObjectIDFromHex(lastIdString)
@@ -180,7 +192,7 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context,  lastIdStrin
 	opts := options.Find().SetLimit(limit).SetSort(bson.M{"_id": -1})
 	output, err := db.collection.Find(ctx, filter, opts)
 	if err != nil {
-		db.Log.Error("failed to search photos by location", zap.Error(err), zap.Float64("longitude", long), zap.Float64("latitude", lat), zap.Int("distance", dist))
+		db.Log.Error("failed to search photos by location", zap.Error(err), zap.Float64("latMin", latMin), zap.Float64("latMax", latMax), zap.Float64("longMin", longMin), zap.Float64("longMax", longMax))
 		return nil, err
 	}
 	if err = output.All(ctx, &photos); err != nil {
@@ -188,6 +200,6 @@ func (db *MongoPhotoDB) SearchPhotosByLocation(ctx context.Context,  lastIdStrin
 		return nil, err
 	}
 
-	db.Log.Info("retrieved photos by location", zap.Int("count", len(photos)), zap.Float64("longitude", long), zap.Float64("latitude", lat), zap.Int("distance", dist))
+	db.Log.Info("retrieved photos by location", zap.Int("count", len(photos)), zap.Float64("latMin", latMin), zap.Float64("latMax", latMax), zap.Float64("longMin", longMin), zap.Float64("longMax", longMax))
 	return photos, nil
 }
