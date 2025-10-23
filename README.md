@@ -7,8 +7,8 @@ This is a personal project designed as a self-hosted alternative to Google Photo
 - **Photo Upload**: Upload photos (up to 200 MB for now) with automatic thumbnail generation.
 - **Metadata Extraction**: Extracts EXIF data (e.g. geolocation, timestamp) from photos.
 - **MongoDB Storage**: Stores photo metadata in a MongoDB database.
-- **Geolocation Search**: Search for photos within a specified distance from a given longitude and latitude.
-- **Secure Access**: Uses JWT-based authentication for secure endpoints.
+- **Geolocation Search**: Search for photos within a specified bounding box (min latitude, max latitude, min longitude and max longitude).
+- **Secure Access**: Uses cookie session authentication for secure endpoints.
 - **Logging**: Comprehensive logging with Zap for debugging and monitoring.
 - **Local Storage**: Stores uploaded photos and thumbnails in a local directory.
 
@@ -45,7 +45,7 @@ MONGO_COLLECTION=photos
 Create a `.env.secret` file for sensitive information:
 
 ```plaintext
-JWT_SECRET=<your-jwt-secret>
+SESSION_SECRET=<your-32byte-session-secret>
 PW='<bcrypt-hashed-password>'
 ```
 
@@ -117,20 +117,20 @@ The server will start on `http://localhost:8080`.
 
 - **GET /photos?id=<photo-id>**
   - Retrieve a single photo by ID (returns full-size photo metadata).
-  - Requires JWT authentication.
+  - Secured.
 - **GET /photos?lastId=<last-id>&limit=<limit>**
   - Retrieve a paginated list of photos (returns thumbnail metadata).
-  - Requires JWT authentication.
+  - Secured.
 - **POST /photos**
   - Upload one or more photos (multipart form with `file` field).
-  - Requires JWT authentication.
+  - Secured.
   - Max file size: 200 MB.
-- **GET /photos/search?long=<longitude>&lat=<latitude>&dist=<distance>**
-  - Search photos by geolocation within a specified distance (in meters).
-  - Requires JWT authentication.
+- **GET /photos/search?latMin=&latMax=&longMin=&longMax=**
+  - Search photos by geolocation within a specified bounding box.
+  - Secured.
 - **GET /files/<filename>**
   - Serve a photo or thumbnail file from the `.uploads` directory.
-  - Requires JWT authentication.
+  - Secured.
 
 ## Project Structure
 
@@ -154,38 +154,38 @@ The server will start on `http://localhost:8080`.
 2. **Upload a Photo**:
 
    ```bash
-   curl -X POST http://localhost:8080/photos -H "Authorization: Bearer <jwt-token>" -F "file=@/path/to/photo.jpg"
+   curl -X POST http://localhost:8080/photos  -F "file=@/path/to/photo.jpg"
    ```
 
 3. **Retrieve Photos**:
 
    ```bash
-   curl "http://localhost:8080/photos?lastId=&limit=10" -H "Authorization: Bearer <jwt-token>"
+   curl "http://localhost:8080/photos?lastId=&limit=10"
    ```
 
 4. **Search Photos by Location**:
 
    ```bash
-   curl "http://localhost:8080/photos/search?long=0&lat=0&dist=1000" -H "Authorization: Bearer <jwt-token>"
+   curl "http://localhost:8080/photos/search?latMin=0&latMax=1&longMin=0&longMax=1"
    ```
 
 5. **Retrieve a Served File**:
    To retrieve a full-size photo or thumbnail from the .Uploads directory, use the `/files/<filename>` endpoint. The filename can be obtained from the FilePath or ThumbnailPath fields in the response from the `/photos` or `/photos/search` endpoints.
 
    ```bash
-   curl "http://localhost:8080/files/<photo-id>.jpg" -H "Authorization: Bearer <jwt-token>" -o photo.jpg
+   curl "http://localhost:8080/files/<photo-id>.jpg"  -o photo.jpg
    ```
 
    Example with a specific photo ID (e.g. `1234567890abcdef12345678`):
 
    ```bash
-   curl "http://localhost:8080/files/1234567890abcdef12345678.jpg" -H "Authorization: Bearer <jwt-token>" -o photo.jpg
+   curl "http://localhost:8080/files/1234567890abcdef12345678.jpg"  -o photo.jpg
    ```
 
    To retrieve a thumbnail:
 
    ```bash
-   curl "http://localhost:8080/files/1234567890abcdef12345678_thumb.jpg" -H "Authorization: Bearer <jwt-token>" -o thumbnail.jpg
+   curl "http://localhost:8080/files/1234567890abcdef12345678_thumb.jpg"  -o thumbnail.jpg
    ```
 
 ## Notes
@@ -193,12 +193,8 @@ The server will start on `http://localhost:8080`.
 - Ensure the `.uploads` directory has sufficient storage space.
 - The application generates thumbnails (100x100 pixels) using the `imaging` library.
 - EXIF data is extracted for geolocation and timestamp; if unavailable, defaults are used.
-- All endpoints except `/login` require a valid JWT token in the `Authorization` header.
+- All endpoints except `/login` require a valid session cookie set.
 
 ## Contributing
 
 This is a personal project, but feel free to fork and modify it for your needs. Suggestions or improvements can be submitted via pull requests.
-
-## License
-
-This project is licensed under the MIT License.
